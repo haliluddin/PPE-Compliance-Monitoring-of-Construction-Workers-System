@@ -1,0 +1,144 @@
+SOFTWARE DEVELOPMENT DOCUMENTATION
+
+IMPORTANT!
+- ALWAYS CHECK IF YOU'RE IN (ppe-env) PS C:\ ... >
+- TO GGO THERE RUN "conda activate ppe-env"
+
+1.) Create Python environment
+
+Download:
+- python 3.13
+- miniconda
+
+Run:
+conda create -n ppe-env python=3.8 -y
+conda activate ppe-env
+
+Encountered errors:
+
+1. The term 'conda' is not recognized
+- Open an Anaconda Prompt
+- Run "conda init powershell"
+- Close and reopen IDE
+- Run again:
+conda create -n ppe-env python=3.8 -y
+conda activate ppe-env
+
+2. Cannot be loaded because running scripts is disabled on this 
+system
+- Open Windows PowerShell “as Administrator”
+- Run "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force"
+- Close and reopen IDE
+- Run again:
+conda create -n ppe-env python=3.8 -y
+conda activate ppe-env
+
+3. CondaToSNonInteractiveError: Terms of Service have not been accepted for the following channels.
+- Run:
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
+- Run again:
+conda create -n ppe-env python=3.8 -y
+conda activate ppe-env
+
+Output: (ppe-env) PS C:\ ... >
+
+
+
+2.) Install core dependencies
+
+- Run: 
+
+pip install ultralytics
+pip install tensorflow==2.10
+pip install tf_slim
+pip install pillow lxml Cython contextlib2
+pip install albumentations
+pip install mediapipe
+pip install roboflow --no-deps
+pip install kaggle opencv-python tqdm matplotlib
+
+
+---
+
+git clone https://github.com/tensorflow/models
+pip install -e models/research/
+
+Encountered errors:
+
+1. ... does not appear to be a Python project: neither 'setup.py' nor 'pyproject.toml' found
+- Open: https://github.com/protocolbuffers/protobuf/releases/tag/v3.19.6
+- Click: protoc-3.19.6-win64.zip
+- Extract all and destination: C:\tools\protoc-3.19.6\
+- Press Win + R > type sysdm.cpl > Enter > System Properties > Advanced tab > Environment Variables > select Path > Edit > New > paste "C:\tools\protoc-3.19.6\bin" > OK > OK > OK
+- Open Windows PowerShell “as Administrator” and run "protoc --version"
+- Close and reopen IDE
+- Run:
+cd .\models\research
+protoc object_detection\protos\*.proto --python_out=.
+copy .\object_detection\packages\tf2\setup.py .\
+pip install -e .
+cd ..\..
+python -c "from object_detection.builders import model_builder; print(model_builder)"
+
+Output: <module 'object_detection.builders.model_builder' from '…\models\research\object_detection\builders\model_builder.py'>
+
+
+
+3.) Data Acquisition & Organization
+
+KAGGLE
+
+- Go to https://www.kaggle.com/ > Log in > Profile > Settings > scroll to API > click Create New API Token (this downloads a file called kaggle.json)
+- Open Windows PowerShell “as Administrator”
+- Run:
+mkdir $env:USERPROFILE\.kaggle
+move .\Downloads\kaggle.json $env:USERPROFILE\.kaggle\kaggle.json
+icacls "$Env:USERPROFILE\.kaggle\kaggle.json" /inheritance:r /grant:r "$($Env:USERNAME):(R)"
+
+
+--- NOT DONE ---
+
+Kaggle dataset URL:
+https://www.kaggle.com/datasets/shlokraval/ppe-dataset-yolov8
+
+download Kaggle dataset:
+kaggle datasets download -d shlokraval/ppe-dataset-yolov8
+
+unzip Kaggle dataset
+Expand-Archive .\ppe-dataset-yolov8.zip -DestinationPath .\data\raw
+
+roboflow workplace invitation: https://app.roboflow.com/join/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ3b3Jrc3BhY2VJZCI6Ik16WUVVZkpna2hiaElHUXhlT0pkOUtRS3NJRzIiLCJyb2xlIjoib3duZXIiLCJpbnZpdGVyIjoiaG5haWxhdGFqaUBnbWFpbC5jb20iLCJpYXQiOjE3NTQzOTgyNzN9.bEgZcyfNlvp-1Uynaz5LqKiaDsOwAQK4J-0QiKkG_UI
+
+roboflow API:
+yzLRobcTuXeZsKpygep2
+
+
+
+
+
+Platform: ppe-kit-detection-construction-site-workers
+Helmet (0)
+Gloves (1)
+Vest (2)
+Boots (3)
+Goggles (4)
+none (5)
+Person (6)
+no_helmet (7)
+no_goggle (8)
+no_gloves (9)
+no_boots (10)
+
+Platform: helmet-vest and boots detection.v8i.yolov8
+(0) boots
+(1) helmet
+(2) no boots
+(3) no helmet
+(4) no vest
+(5) person
+(6) vest
+
+
+
