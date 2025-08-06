@@ -1,0 +1,4 @@
+train: ../data/augmented/images
+val:   ../data/augmented/images
+nc:    4  
+names: ['helmet','vest','gloves','boots']
