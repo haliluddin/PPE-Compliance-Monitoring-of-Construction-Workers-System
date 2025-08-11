@@ -7,7 +7,12 @@ from sklearn.model_selection import train_test_split
 MASTER_CLASSES = {"helmet": 0, "vest": 1, "gloves": 2, "boots": 3}
 PLATFORMS = {
     "ppe-kit-detection-construction-site-workers": {"helmet": 0, "gloves": 1, "vest": 2, "boots": 3},
-    "helmet-vest and boots detection.v8i.yolov8": {"boots": 0, "helmet": 1, "vest": 6}
+    "Aryan_Verma.v1i.yolov8": {"boots": 0, "gloves": 1, "hard-hat": 2, "vest": 6},
+    "Personal Protective Equipment.v1-roboflow-instant-1--eval-.yolov8": {"Gloves": 1, "Hat": 2, "boots": 3, "vest": 5},
+    "ppe equipment.v4i.yolov8": {"Gloves": 0, "boots": 1, "safe_hat": 2, "vest": 3},
+    "PPE Object Detection.v1i.yolov8": {"boots": 5, "glove": 8, "helmet": 9, "vest": 17},
+    "ppe user.v1i.yolov8": {"boots": 8, "glove": 11, "helmet": 12, "vest": 22},
+    "PPE.v2i.yolov8": {"Boot": 0, "Glove": 1, "Helmet": 7, "Vest": 8},
 }
 REMAP = {pname: {orig: MASTER_CLASSES[lbl] for lbl, orig in cmap.items() if lbl in MASTER_CLASSES} for pname, cmap in PLATFORMS.items()}
 BLUR_THRESH = 100.0
