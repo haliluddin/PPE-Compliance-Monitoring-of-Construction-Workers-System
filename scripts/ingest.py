@@ -7,24 +7,45 @@ from sklearn.model_selection import train_test_split
 MASTER_CLASSES = {"helmet": 0, "vest": 1, "gloves": 2, "boots": 3}
 
 PLATFORMS = {
-    "Aryan_Verma.v1i.yolov8": {"boots": 0, "gloves": 1, "hard-hat": 2, "vest": 6},
-    "Glove_detection.v3i.yolov8": {"Glove Wearing": 0},
-    "Hard Hat Detector.v1i.yolov8": {"0": 0},
-    "helmet-vest and boots detection.v1i.yolov8": {"boots": 0, "gloves": 1, "helmet": 2, "vest": 7},
-    "IS boots.v1i.yolov8": {"Boots": 0},
-    "Personal Protective Equipment.v1-roboflow-instant-1--eval-.yolov8": {
-        "Gloves": 1, "Hat": 2, "boots": 3, "vest": 5
+    "PPE GRAD V3.v4i.yolov8": {
+        "Boots": 0, "Glove": 1, "Hardhat": 2, "Vest": 4
     },
-    "ppe equipment.v4i.yolov8": {"Gloves": 0, "boots": 1, "safe_hat": 2, "vest": 3},
-    "Safety Shoes dataset.v1i.yolov8": {"safety_shoe": 1},
-    "Safety Vests.v9i.yolov8": {"vest": 1},
+
+    "safety-boots.v1i.yolov8": {
+        "boot": 0, "bootr": 1, "hardhat": 2, "vest": 5
+    },
+
+    "PPE v2.1.v2i.yolov8": {
+        "Gloves": 0, "Hardhat": 1, "Safety Vest": 8, "Shoes": 9
+    },
+
+    "allV1.0.0.v2i.yolov8": {
+        "Boots": 0, "Gloves": 1, "HardHat": 3, "Vest": 5
+    },
+
+    "PPE.v6i.yolov8": {
+        "boots": 0, "gloves": 1, "hardhat": 2, "vest": 8
+    },
+
+    "PPE.v14-allinone.yolov8": {
+        "boots": 0, "gloves": 1, "hardhat": 2, "vest": 8
+    },
+
+    "ppe gogglesgloves goggles.v1i.yolov8": {
+        "boots": 0, "gloves": 1, "helmet": 3, "vest": 4
+    },
 }
 
 SYNONYMS = {
-    "hard-hat": "helmet", "hard_hat": "helmet", "hat": "helmet", "safe_hat": "helmet",
-    "0": "helmet", "glove wearing": "gloves", "gloves": "gloves", "glove": "gloves",
-    "boots": "boots", "safety_shoe": "boots", "safety shoe": "boots", "safetyshoe": "boots",
-    "vest": "vest",
+    "hard-hat": "helmet", "hard_hat": "helmet", "hardhat": "helmet",
+    "hard hat": "helmet", "hat": "helmet", "helmet": "helmet", "safe_hat": "helmet",
+
+    "glove wearing": "gloves", "glove": "gloves", "gloves": "gloves", "gloveing": "gloves",
+
+    "boots": "boots", "boot": "boots", "safety_shoe": "boots", "safety shoe": "boots",
+    "safetyshoe": "boots", "shoe": "boots", "shoes": "boots", "bootr": "boots",
+
+    "vest": "vest", "safety vest": "vest", "safety_vest": "vest",
 }
 
 def build_remap(platforms, synonyms, master_classes):
@@ -80,7 +101,7 @@ def convert_coco_to_yolo(coco_json: Path, out_dir: Path, remap: dict):
         candidates = [cat_id, (cat_id - 1 if isinstance(cat_id, int) else None), (cat_id + 1 if isinstance(cat_id, int) else None)]
         cls = None
         for c in candidates:
-            if c is None: 
+            if c is None:
                 continue
             cls = remap.get(int(c))
             if cls is not None:
