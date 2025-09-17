@@ -1,52 +1,58 @@
+# scripts/ingest.py
 import json
 import cv2
 from pathlib import Path
 from shutil import copy2
 from sklearn.model_selection import train_test_split
 
-MASTER_CLASSES = {"helmet": 0, "vest": 1, "gloves": 2, "boots": 3}
+MASTER_CLASSES = {"helmet": 0, "vest": 1, "gloves": 2, "boots": 3, "person": 4}
 
 PLATFORMS = {
-    "PPE GRAD V3.v4i.yolov8": {
-        "Boots": 0, "Glove": 1, "Hardhat": 2, "Vest": 4
+    "gloves.v1i.yolov8": {
+        "glove": 0, "helmet": 1, "shoe": 2, "vest": 3
     },
 
-    "safety-boots.v1i.yolov8": {
-        "boot": 0, "bootr": 1, "hardhat": 2, "vest": 5
+    "Hard Hat Universe.v1i.yolov8": {
+        "glove": 0, "helmet": 1, "person": 2, "shoe": 3, "vest": 4
+    },
+    "Hard Hat Universe.v1i.yolov8 (1)": {
+        "glove": 0, "helmet": 1, "person": 2, "shoe": 3, "vest": 4
+    },
+    "Hard Hat Universe.v1i.yolov8 (3)": {
+        "glove": 0, "helmet": 1, "person": 2, "shoe": 3, "vest": 4
+    },
+    "Hard Hat Universe.v2i.yolov8": {
+        "glove": 0, "helmet": 1, "person": 2, "shoe": 3, "vest": 4
     },
 
-    "PPE v2.1.v2i.yolov8": {
-        "Gloves": 0, "Hardhat": 1, "Safety Vest": 8, "Shoes": 9
+    "helmet detection.v1i.yolov8": {
+        "Gloves": 0, "Helmet": 1, "Shoes": 3, "Vest": 4
     },
 
-    "allV1.0.0.v2i.yolov8": {
-        "Boots": 0, "Gloves": 1, "HardHat": 3, "Vest": 5
+    "helmet-vest and boots detection.v2i.yolov8": {
+        "boots": 0, "gloves": 1, "helmet": 2, "vest": 6
     },
 
-    "PPE.v6i.yolov8": {
-        "boots": 0, "gloves": 1, "hardhat": 2, "vest": 8
+    "PPE Detection.v1i.yolov8": {
+        "boots": 0, "gloves": 1, "helmet": 2, "vest": 3
     },
 
-    "PPE.v14-allinone.yolov8": {
-        "boots": 0, "gloves": 1, "hardhat": 2, "vest": 8
-    },
-
-    "ppe gogglesgloves goggles.v1i.yolov8": {
-        "boots": 0, "gloves": 1, "helmet": 3, "vest": 4
+    "ppe equipment.v1i.yolov8": {
+        "Gloves": 0, "boots": 1, "safe_hat": 2, "vest": 3
     },
 }
 
 SYNONYMS = {
-    "hard-hat": "helmet", "hard_hat": "helmet", "hardhat": "helmet",
-    "hard hat": "helmet", "hat": "helmet", "helmet": "helmet", "safe_hat": "helmet",
-
-    "glove wearing": "gloves", "glove": "gloves", "gloves": "gloves", "gloveing": "gloves",
-
-    "boots": "boots", "boot": "boots", "safety_shoe": "boots", "safety shoe": "boots",
-    "safetyshoe": "boots", "shoe": "boots", "shoes": "boots", "bootr": "boots",
-
-    "vest": "vest", "safety vest": "vest", "safety_vest": "vest",
+    "glove": "gloves",
+    "gloves": "gloves",
+    "shoe": "boots",
+    "shoes": "boots",
+    "boots": "boots",
+    "helmet": "helmet",
+    "safe_hat": "helmet",
+    "vest": "vest",
 }
+
 
 def build_remap(platforms, synonyms, master_classes):
     remaps = {}
@@ -172,6 +178,7 @@ def ingest():
                 out_lbl = PROC_LBL / lbl.name
                 copy2(img, out_img)
                 out_lbl.write_text("\n".join(lines_out), encoding="utf8")
+                copy2(out_lbl, out_img.with_suffix(".txt"))
                 files.append(img.name)
 
         for coco in plat.glob("*.json"):
@@ -193,10 +200,11 @@ def ingest():
                     continue
                 if is_blurry(img) or is_too_dark(img):
                     continue
+                dst_img = PROC_IMG / src.name
+                copy2(src, dst_img)
                 lbl = PROC_LBL / Path(fname).with_suffix(".txt").name
-                if not lbl.exists():
-                    continue
-                copy2(src, PROC_IMG / src.name)
+                if lbl.exists():
+                    copy2(lbl, dst_img.with_suffix(".txt"))
                 files.append(src.name)
 
     files = sorted(set(files))
@@ -211,9 +219,12 @@ def ingest():
     trvl, tst = train_test_split(files, test_size=0.15, random_state=42)
     trn, val = train_test_split(trvl, test_size=0.1765, random_state=42)
 
-    (SPLITS_DIR / "train.txt").write_text("\n".join(trn), encoding="utf8")
-    (SPLITS_DIR / "val.txt").write_text("\n".join(val), encoding="utf8")
-    (SPLITS_DIR / "test.txt").write_text("\n".join(tst), encoding="utf8")
+    def abs_paths_for(names):
+        return "\n".join(str((PROC_IMG / name).as_posix()) for name in names)
+
+    (SPLITS_DIR / "train.txt").write_text(abs_paths_for(trn), encoding="utf8")
+    (SPLITS_DIR / "val.txt").write_text(abs_paths_for(val), encoding="utf8")
+    (SPLITS_DIR / "test.txt").write_text(abs_paths_for(tst), encoding="utf8")
 
     print(f"Ingested {len(files)} images → {len(trn)}/{len(val)}/{len(tst)} splits.")
     if skipped:
