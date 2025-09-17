@@ -1,0 +1,27 @@
+React.js setup
+	Download and install node.js and npm
+	https://nodejs.org/en/download (LTS version Windows)
+o	Node version (v22.19.0)
+o	Npm version (10.9.3)
+
+	Install Packages (Non Repo)
+o	Npm create vite@latest (folder name)
+o	Prompt select React and Javascript
+o	>>cd (foldername)
+>>npm install
+>>npm run dev (run project)
+o	Open local host server
+o	npm install react-router-dom(routing and navigation )
+	Icons
+o	npm install react-icons
+
+	UI Library
+	Tailwind CSS
+o	npm install -D tailwindcss@^3 postcss autoprefixer
+o	npx tailwindcss init –p
+
+	VS Code Extensions
+	Prettier- Code Formatter
+	ES7+ React/Redux/React-Native snippets
+	Tailwind CSS intellisense
+

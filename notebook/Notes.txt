@@ -1,0 +1,45 @@
+09/17/2025
+-temporary login using onLogin function- no validation/database setup yet
+- Setup React project in existing GitHub repository using Vite.
+- Installed Node.js and npm for React development.
+- Added Tailwind CSS for styling and configured theme colors:
+    Primary: #21005D
+    Secondary: #5388DF
+    Background/Text: #FFFFFF / #19325C
+- Implemented Login page:
+    - Styled input fields with custom borders and focus rings.
+    - Added background color instead of image.
+    - Created Sign In button with hover effects.
+    - Added temporary redirect to Camera page on submit using react-router-dom.
+- Fixed blank page issue caused by double BrowserRouter wrapping.
+- Implemented Camera page layout:
+    - Added collapsible sidebar with menu items: Camera, Notifications, Incidents, Workers, Reports.
+    - Added hamburger icon for sidebar toggle using react-icons.
+- Added action buttons with icons (Upload Videos, Add Camera) aligned center using flex utilities.
+- Created reusable ImageCard component:
+    - Displays image at top, title bottom-left, time bottom-right.
+    - Clickable with hover scale effect.
+    - Added colored border and shadow outlining the card.
+- Added standalone color-coded small circles for status indicators.
+- Wrapped color-coded indicators in pill badges with theme colors.
+- Added live date and time display:
+    - Updates every second.
+    - Styled as a pill badge.
+    - Removed seconds to show only HH:MM.
+- Implemented reusable table component (CustomTable):
+    - Accepts columns, data, and optional actions per row.
+    - Fully styled with theme colors, hover effects, rounded corners.
+    - Responsive with horizontal scrolling for smaller screens.
+- Added From–To date picker using react-datepicker:
+    - Styled with Tailwind to match theme.
+    - Start and End dates linked to prevent invalid ranges.
+
+- Errors/solutions:
+    - Blank page caused by double BrowserRouter → removed duplicate wrapper.
+    - Login page redirect handled using useNavigate from react-router-dom.
+    - Input focus styling not matching theme → added proper Tailwind classes with focus:ring-[color].
+    - Overlay text on ImageCard initially not readable → added semi-transparent overlay with theme color.
+    - Live time included seconds by default → updated to HH:MM only.
+    - Table styling for responsive overflow → added overflow-x-auto.
+    - Date picker initially unstyled → imported react-datepicker CSS and added Tailwind classes.
+
