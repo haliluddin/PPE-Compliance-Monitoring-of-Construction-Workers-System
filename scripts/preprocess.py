@@ -46,13 +46,80 @@ def load_annotation_file(label_path: Path):
             entries.append({'type': 'poly', 'class': cls, 'coords': coords})
     return entries
 
+def poly_to_bbox_norm(coords):
+    xs = coords[0::2]
+    ys = coords[1::2]
+    minx = min(xs); maxx = max(xs)
+    miny = min(ys); maxy = max(ys)
+    cx = (minx + maxx) / 2.0
+    cy = (miny + maxy) / 2.0
+    w = maxx - minx
+    h = maxy - miny
+    return cx, cy, w, h
+
+def clip_coords01(coords):
+    return [min(max(v, 0.0), 1.0) for v in coords]
+
 def write_annotation_file(entries, out_label_path: Path):
     lines = []
     for e in entries:
         cls = e['class']
         coords = e['coords']
-        lines.append(f"{cls} {' '.join(f'{v:.6f}' for v in coords)}")
+        if e['type'] == 'bbox':
+            cx, cy, w, h = coords
+            lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+        else:
+            # poly: coords are normalized x1 y1 x2 y2 ...
+            # clip polygon coords to [0,1]
+            clipped = clip_coords01(coords)
+            # count how many vertices are within bounds after clipping
+            pairs = list(zip(clipped[0::2], clipped[1::2]))
+            verts_in = sum(1 for x,y in pairs if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0)
+            if verts_in < 3:
+                # skip degenerate polygons
+                continue
+            # compute bbox from clipped polygon
+            cx, cy, w, h = poly_to_bbox_norm(clipped)
+            # ensure bbox is within reasonable bounds
+            cx = min(max(cx, 0.0), 1.0)
+            cy = min(max(cy, 0.0), 1.0)
+            w = min(max(w, 0.0), 1.0)
+            h = min(max(h, 0.0), 1.0)
+            poly_str = " ".join(f"{v:.6f}" for v in clipped)
+            lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {poly_str}")
     out_label_path.write_text("\n".join(lines))
+
+def validate_labels(label_dir: Path):
+    bad = []
+    for p in label_dir.glob("*.txt"):
+        for ln in p.read_text(encoding="utf8").splitlines():
+            parts = ln.split()
+            if not parts:
+                continue
+            try:
+                cls = int(parts[0])
+            except Exception:
+                bad.append((p.name, "bad_class", ln))
+                continue
+            nums = list(map(float, parts[1:]))
+            if len(nums) < 4:
+                bad.append((p.name, "too_few_numbers", ln))
+                continue
+            # check bbox
+            bx = nums[0]; by = nums[1]; bw = nums[2]; bh = nums[3]
+            if not (0.0 <= bx <= 1.0 and 0.0 <= by <= 1.0 and 0.0 <= bw <= 1.0 and 0.0 <= bh <= 1.0):
+                bad.append((p.name, "bbox_out_of_range", ln))
+            # if there are segment coords, check them
+            if len(nums) > 4:
+                seg = nums[4:]
+                if len(seg) % 2 != 0:
+                    bad.append((p.name, "odd_segment_length", ln))
+                    continue
+                for v in seg:
+                    if v < 0.0 or v > 1.0:
+                        bad.append((p.name, "segment_out_of_range", ln))
+                        break
+    return bad
 
 def augment_all():
     for img_path in PROC_IMG.glob("*.*"):
@@ -118,6 +185,7 @@ def augment_all():
             aug_bbox_classes = augmented.get('bbox_class_labels', [])
             aug_keypoints = augmented.get('keypoints', [])
 
+            # rebuild polys from keypoints, normalize relative to augmented image
             polys_reconstructed = []
             kp_idx = 0
             for group_i, pts_count in enumerate(poly_group_sizes):
@@ -130,6 +198,7 @@ def augment_all():
                 cls = poly_classes[group_i]
                 polys_reconstructed.append({'class': cls, 'coords': coords_norm})
 
+            # now combine bbox and polys in original order
             final_entries = []
             bbox_i = 0
             poly_i = 0
@@ -153,11 +222,20 @@ def augment_all():
             write_annotation_file(final_entries, out_lbl)
             copy2(out_lbl, out_img.with_suffix(".txt"))
 
+        # copy originals as well
         copy2(img_path, AUG_IMG / img_path.name)
         copy2(lbl_path, AUG_LBL / lbl_path.name)
         copy2(lbl_path, AUG_IMG / lbl_path.name)
 
     print("Augmentation complete (train split only).")
+    # quick validation report
+    bad = validate_labels(AUG_LBL)
+    if bad:
+        print("Label validation issues found (sample):")
+        for fn, reason, ln in bad[:20]:
+            print(f" - {fn}: {reason}")
+    else:
+        print("No obvious label issues detected in augmented labels.")
 
 if __name__ == "__main__":
     augment_all()
