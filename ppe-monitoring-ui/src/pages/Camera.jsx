@@ -91,7 +91,6 @@ export default function Camera() {
             title="Camera 1"
             time="12:45 PM"
           />
-          {/* Add more <ImageCard /> components as needed */}
         </div>
       </section>
     </div>

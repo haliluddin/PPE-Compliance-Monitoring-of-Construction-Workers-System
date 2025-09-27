@@ -113,7 +113,7 @@ export default function Incident() {
                 <div className="flex gap-3">
                   {/* Blue dot for unread */}
                   {n.isNew && (
-                    <span className="w-3 h-3 mt-2 rounded-full bg-blue-500 shrink-0"></span>
+                    <span className="w-3 h-3 mt-2 rounded-full bg-blue shrink-0"></span>
                   )}
 
                   <div className="flex flex-col">
@@ -131,7 +131,6 @@ export default function Incident() {
                   </div>
                 </div>
 
-                {/* Right: menu */}
                 <div className="relative">
                   <button
                     onClick={() => toggleMenu(n.id)}
