@@ -2,7 +2,7 @@ import { useState } from "react";
 import { FaExclamationCircle } from "react-icons/fa";
 import { FiMoreVertical } from "react-icons/fi";
 
-export default function Incident() {
+export default function Notifications() {
   const notifications = [
     {
       id: 1,
