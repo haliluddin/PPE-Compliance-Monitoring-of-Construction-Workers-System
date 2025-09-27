@@ -1,0 +1,30 @@
+item {
+  id: 1
+  name: "glove"
+}
+
+item {
+  id: 2
+  name: "helmet"
+}
+
+item {
+  id: 3
+  name: "person"
+}
+
+item {
+  id: 4
+  name: "ppe-Hard-Hats-person-helmet-3SNn"
+}
+
+item {
+  id: 5
+  name: "shoe"
+}
+
+item {
+  id: 6
+  name: "vest"
+}
+

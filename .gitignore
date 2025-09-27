@@ -1,3 +1,5 @@
 ﻿data/raw/
-data/processed/
-data/augmented/
+data/new/
+models/mask_rcnn_experiments/
+models/mask_rcnn_export/
+efficientdet/output_timm_b3/
