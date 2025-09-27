@@ -1,4 +1,7 @@
 ﻿data/raw/
+data/processed/
+data/augmented/
+data/yolo/
 data/new/
 models/mask_rcnn_experiments/
 models/mask_rcnn_export/
