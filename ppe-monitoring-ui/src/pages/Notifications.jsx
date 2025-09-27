@@ -29,6 +29,16 @@ export default function Incident() {
     setOpenMenu(openMenu === id ? null : id);
   };
 
+   /* dropdown lists */
+    const cameraOptions   = ["Camera A", "Camera B", "Camera C"];
+    const violationOptions = ["No Helmet", "No Vest", "No Gloves"];
+  
+    /* selected value */
+    const [filters, setFilters] = useState({
+      camera: "",
+      violation: "",
+    });
+    
   const menuActions = [
     { label: "Mark as Unread", onClick: (id) => alert(`Mark ${id} as unread`) },
     { label: "Delete Notification", onClick: (id) => alert(`Delete ${id}`) },
@@ -50,21 +60,47 @@ export default function Incident() {
       </header>
 
       {/* ---------- Filters ---------- */}
-      <section className="mb-8">
+      <section className="mb-10">
+       
+
         <div className="flex flex-wrap gap-6">
-          {["Camera", "Violation Type"].map((label) => (
-            <div className="flex flex-col w-60" key={label}>
-              <label className="font-medium text-sm mb-1">{label}</label>
-              <select className="px-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#19325C]">
-                <option>Select an option</option>
-                <option>Placeholder</option>
-                <option>Placeholder</option>
-              </select>
-              <span className="text-xs text-gray-500 mt-1">
-                Pick a {label.toLowerCase()} to filter.
-              </span>
-            </div>
-          ))}
+          {/* Camera Dropdown */}
+          <div className="flex flex-col w-60">
+            <label className="font-medium text-sm mb-1">Camera</label>
+            <select
+              value={filters.camera}
+              onChange={(e) => handleChange("camera", e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#19325C]"
+            >
+              <option value="">Select a camera</option>
+              {cameraOptions.map((cam) => (
+                <option key={cam} value={cam}>{cam}</option>
+              ))}
+            </select>
+            <span className="text-xs text-gray-500 mt-1">
+              Pick a camera to filter results.
+            </span>
+          </div>
+
+          {/* Violation Dropdown */}
+          <div className="flex flex-col w-60">
+            <label className="font-medium text-sm mb-1">Violation Type</label>
+            <select
+              value={filters.violation}
+              onChange={(e) => handleChange("violation", e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#19325C]"
+            >
+              <option value="">Select a violation</option>
+              {violationOptions.map((vio) => (
+                <option key={vio} value={vio}>{vio}</option>
+              ))}
+            </select>
+            <span className="text-xs text-gray-500 mt-1">
+              Pick a violation type to filter results.
+            </span>
+          </div>
+
+
         </div>
       </section>
 

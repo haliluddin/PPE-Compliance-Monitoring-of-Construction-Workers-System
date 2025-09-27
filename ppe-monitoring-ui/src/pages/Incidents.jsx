@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 import { FaEye, FaCheckCircle, FaExclamationCircle } from "react-icons/fa";
 
 export default function Incident() {
@@ -20,6 +21,21 @@ export default function Incident() {
     },
   ];
 
+  /* dropdown lists */
+  const cameraOptions   = ["Camera A", "Camera B", "Camera C"];
+  const violationOptions = ["No Helmet", "No Vest", "No Gloves"];
+  const statusOptions    = ["Pending", "Resolved", "Under Review"];
+
+  /* selected value */
+  const [filters, setFilters] = useState({
+    camera: "",
+    violation: "",
+    status: "",
+  });
+
+  const handleChange = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  };
   const statusBadge = (status) => {
     switch (status) {
       case "Resolved":
@@ -55,26 +71,66 @@ export default function Incident() {
       <section className="mb-10">
         <h2 className="text-xl font-semibold mb-2">Filter Incidents</h2>
         <p className="text-gray-600 text-sm mb-4">
-          Quickly locate specific incidents by selecting a camera, violation type, or status.
+          Select a camera, violation type, or status to filter results. 
         </p>
 
         <div className="flex flex-wrap gap-6">
-          {["Camera", "Violation Type", "Status"].map((label) => (
-            <div className="flex flex-col w-60" key={label}>
-              <label className="font-medium text-sm mb-1">{label}</label>
-              <select className="px-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#19325C]">
-                <option>Select an option</option>
-                <option>Placeholder</option>
-                <option>Placeholder</option>
-              </select>
-              <span className="text-xs text-gray-500 mt-1">
-                Pick a {label.toLowerCase()} to filter results.
-              </span>
-            </div>
-          ))}
+          {/* Camera Dropdown */}
+          <div className="flex flex-col w-60">
+            <label className="font-medium text-sm mb-1">Camera</label>
+            <select
+              value={filters.camera}
+              onChange={(e) => handleChange("camera", e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#19325C]"
+            >
+              <option value="">Select a camera</option>
+              {cameraOptions.map((cam) => (
+                <option key={cam} value={cam}>{cam}</option>
+              ))}
+            </select>
+            <span className="text-xs text-gray-500 mt-1">
+              Pick a camera to filter results.
+            </span>
+          </div>
+
+          {/* Violation Dropdown */}
+          <div className="flex flex-col w-60">
+            <label className="font-medium text-sm mb-1">Violation Type</label>
+            <select
+              value={filters.violation}
+              onChange={(e) => handleChange("violation", e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#19325C]"
+            >
+              <option value="">Select a violation</option>
+              {violationOptions.map((vio) => (
+                <option key={vio} value={vio}>{vio}</option>
+              ))}
+            </select>
+            <span className="text-xs text-gray-500 mt-1">
+              Pick a violation type to filter results.
+            </span>
+          </div>
+
+          {/* Status Dropdown */}
+          <div className="flex flex-col w-60">
+            <label className="font-medium text-sm mb-1">Status</label>
+            <select
+              value={filters.status}
+              onChange={(e) => handleChange("status", e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#19325C]"
+            >
+              <option value="">Select a status</option>
+              {statusOptions.map((stat) => (
+                <option key={stat} value={stat}>{stat}</option>
+              ))}
+            </select>
+            <span className="text-xs text-gray-500 mt-1">
+              Pick a status to filter results.
+            </span>
+          </div>
         </div>
       </section>
-
+      
       {/* ---------- Incident Table ---------- */}
       <section>
         <h2 className="text-xl font-semibold mb-4">Incident List</h2>
