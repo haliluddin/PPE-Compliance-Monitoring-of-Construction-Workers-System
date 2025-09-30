@@ -170,57 +170,75 @@ yolo task=detect mode=train `
      name=ppe_yolov8n_run1 `
      device=0
 
-run if there's warning about ibiomp5md.dll: $Env:KMP_DUPLICATE_LIB_OK = "TRUE"
-
-
---- training ... ---
-
-
-
---- NOT DONE ---
 
 
 
 
-Scratch Only :
+----- TRAINING -----
 
-Kaggle dataset URL:
-https://www.kaggle.com/datasets/shlokraval/ppe-dataset-yolov8
 
-download Kaggle dataset:
-kaggle datasets download -d shlokraval/ppe-dataset-yolov8
 
-unzip Kaggle dataset
-Expand-Archive .\ppe-dataset-yolov8.zip -DestinationPath .\data\raw
+To train (yolov8):
 
-roboflow workplace invitation: https://app.roboflow.com/join/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ3b3Jrc3BhY2VJZCI6Ik16WUVVZkpna2hiaElHUXhlT0pkOUtRS3NJRzIiLCJyb2xlIjoib3duZXIiLCJpbnZpdGVyIjoiaG5haWxhdGFqaUBnbWFpbC5jb20iLCJpYXQiOjE3NTQzOTgyNzN9.bEgZcyfNlvp-1Uynaz5LqKiaDsOwAQK4J-0QiKkG_UI
+yolo task=segment mode=train model=yolov8n-seg.pt data=data.yaml epochs=50 imgsz=416 batch=16 name=ppe_yolov8n_seg_run1 device=0
 
-roboflow API:
-yzLRobcTuXeZsKpygep2
 
----
 
-Platform: ppe-kit-detection-construction-site-workers
-Helmet (0)
-Gloves (1)
-Vest (2)
-Boots (3)
-Goggles (4)
-none (5)
-Person (6)
-no_helmet (7)
-no_goggle (8)
-no_gloves (9)
-no_boots (10)
+For validation and test (yolov8):
 
-Platform: helmet-vest and boots detection.v8i.yolov8
-(0) boots
-(1) helmet
-(2) no boots
-(3) no helmet
-(4) no vest
-(5) person
-(6) vest
+$ckpt = "runs/segment/ppe_yolov8n_seg_run1/weights/best.pt"
+yolo val data=data.yaml model=$ckpt device=0 save_json=True plots=True
+yolo val data=data.yaml model=$ckpt split=test device=0 save_json=True plots=True
+
+
+
+To train (Mask rcnn):
+
+python "models\research\object_detection\model_main_tf2.py" `
+  --pipeline_config_path="scripts\mask_rcnn.config" `
+  --model_dir="models\mask_rcnn_experiments\run1" `
+  --alsologtostderr
+
+
+
+To remove DOM whenever there's changes in config (Mask rcnn):
+
+$path = 'scripts\mask_rcnn.config'
+$bytes = [System.IO.File]::ReadAllBytes($path)
+
+if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+    $new = $bytes[3..($bytes.Length - 1)]
+    [System.IO.File]::WriteAllBytes($path, $new)
+    "Removed UTF-8 BOM from $path"
+} else {
+    "No UTF-8 BOM detected; file left unchanged"
+}
+
+
+
+To train (Efficientdet):
+
+python train_timm_maskrcnn.py --train-json "data/new/train/_annotations.coco.json" --val-json "data/new/valid/_annotations.coco.json" --train-images "data/new/train/" --val-images "data/new/valid/" --num-classes 6 --output-dir "./output_timm_b3" --model-name "tf_efficientnet_b3_ns"  
+
+
+
+To evaluate (Efficientdet):
+
+python train_timm_maskrcnn.py --train-json "data/new/train/_annotations.coco.json" --val-json "data/new/valid/_annotations.coco.json" --train-images "data/new/train/" --val-images "data/new/valid/" --num-classes 6 --output-dir "./output_timm_b3" --model-name "tf_efficientnet_b3_ns" --eval-only
+
+
+
+To visualize evaluation (Efficientdet):
+
+python visualize_preds.py --weights "./output_timm_b3/model_final.pth" --val-json "data/new/valid/_annotations.coco.json" --val-images "data/new/valid/" --output-dir "./output_viz"
+
+
+
+To resume (yolov8) training:
+
+yolo task=segment mode=train model=runs/segment/ppe_yolov8n_seg_run12/weights/last.pt data=data.yaml epochs=50 imgsz=416 batch=16 name=ppe_yolov8n_seg_run12 device=0 --resume
+
+
 
 
 
