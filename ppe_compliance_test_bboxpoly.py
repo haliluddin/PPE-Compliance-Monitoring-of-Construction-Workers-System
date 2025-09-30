@@ -42,7 +42,7 @@ PPE_CLASS_IDS = [0, 1, 3, 4]  # glove, helmet, shoe, vest
 
 print("Loading YOLO (person) model...")
 yolo = YOLO(YOLO_MODEL)
-print("Loading PPE segmentation model (we'll only use its boxes)...")
+print("Loading PPE segmentation model (we'll use boxes + polys/masks)...")
 yolo_ppe = YOLO(PPE_MODEL_PATH)
 
 mp_pose = mp.solutions.pose
@@ -107,7 +107,6 @@ def open_source(src):
         return cv2.VideoCapture(src)
 
 def iou(boxA, boxB):
-    # boxes are (x1,y1,x2,y2)
     xA = max(boxA[0], boxB[0]); yA = max(boxA[1], boxB[1])
     xB = min(boxA[2], boxB[2]); yB = min(boxA[3], boxB[3])
     interW = max(0.0, xB - xA)
@@ -131,18 +130,145 @@ def combine_boxes_by_class(r, img_h, img_w):
         confs = boxes.conf.cpu().numpy()
         cls = boxes.cls.cpu().numpy().astype(int)
     except Exception:
-        # fallback if CPU tensors not available
         xyxy = np.array(boxes.xyxy).astype(float)
         confs = np.array(boxes.conf).astype(float)
         cls = np.array(boxes.cls).astype(int)
     for (x1, y1, x2, y2), c, cl in zip(xyxy, confs, cls):
         if int(cl) not in PPE_CLASS_IDS:
             continue
-        # clamp
         x1c = max(0, float(x1)); y1c = max(0, float(y1))
         x2c = min(img_w - 1, float(x2)); y2c = min(img_h - 1, float(y2))
         boxes_by_class[int(cl)].append((x1c, y1c, x2c, y2c, float(c)))
     return boxes_by_class
+
+def parse_ppe_instances(r, img_h, img_w):
+    instances_by_class = {cid: [] for cid in PPE_CLASS_IDS}
+    boxes = getattr(r, "boxes", None)
+    masks = getattr(r, "masks", None)
+
+    # extract boxes info
+    box_xyxy = []
+    box_conf = []
+    box_cls = []
+    if boxes is not None and len(boxes) > 0:
+        try:
+            box_xyxy = boxes.xyxy.cpu().numpy()
+            box_conf = boxes.conf.cpu().numpy()
+            box_cls = boxes.cls.cpu().numpy().astype(int)
+        except Exception:
+            box_xyxy = np.array(boxes.xyxy)
+            box_conf = np.array(boxes.conf)
+            box_cls = np.array(boxes.cls).astype(int)
+
+    # polygons if available
+    polys = None
+    if masks is not None and hasattr(masks, "xy") and masks.xy is not None:
+        polys = masks.xy  # list-of-polygons aligned with instances
+    # raster masks fallback
+    raster_masks = None
+    if masks is not None and hasattr(masks, "data") and masks.data is not None:
+        try:
+            raster_masks = masks.data.cpu().numpy()
+        except Exception:
+            raster_masks = np.array(masks.data)
+
+    # iterate instances
+    n_inst = len(box_xyxy)
+    for i in range(n_inst):
+        cls_id = int(box_cls[i])
+        if cls_id not in PPE_CLASS_IDS:
+            continue
+        x1, y1, x2, y2 = box_xyxy[i].astype(int)
+        conf = float(box_conf[i])
+        poly = None
+        mask_arr = None
+
+        # get poly if available
+        if polys is not None and i < len(polys):
+            try:
+                poly_item = polys[i]
+                # poly_item might be a list of polygons (multi-contour) or flat list
+                if isinstance(poly_item, (list, tuple)) and len(poly_item) > 0:
+                    # if first element is sequence -> multiple polygons
+                    if isinstance(poly_item[0], (list, tuple, np.ndarray)):
+                        # for simplicity we take the first polygon; you can keep all if you want
+                        poly = np.array(poly_item[0], dtype=np.int32).reshape(-1, 2)
+                    else:
+                        poly = np.array(poly_item, dtype=np.int32).reshape(-1, 2)
+                else:
+                    poly = np.array(poly_item, dtype=np.int32).reshape(-1, 2)
+            except Exception:
+                poly = None
+
+        # get raster mask if available
+        if mask_arr is None and raster_masks is not None and i < raster_masks.shape[0]:
+            mask_i = raster_masks[i]
+            # resize mask to full frame if needed
+            if mask_i.shape[0] != img_h or mask_i.shape[1] != img_w:
+                try:
+                    mask_i = cv2.resize((mask_i > 0.5).astype("uint8"), (img_w, img_h), interpolation=cv2.INTER_NEAREST)
+                except Exception:
+                    mask_i = (mask_i > 0.5).astype("uint8")
+            else:
+                mask_i = (mask_i > 0.5).astype("uint8")
+            mask_arr = mask_i
+
+        instances_by_class[cls_id].append({
+            "box": (int(x1), int(y1), int(x2), int(y2)),
+            "conf": conf,
+            "poly": poly,       # numpy Nx2 or None
+            "mask": mask_arr    # np.ndarray HxW (uint8) or None
+        })
+    return instances_by_class
+
+def draw_ppe_instances_on_frame(frame, instances_by_class, alpha_mask=0.35):
+    h, w = frame.shape[:2]
+    overlay = frame.copy()
+    for cid, inst_list in instances_by_class.items():
+        color = PPE_COLORS.get(cid, (0,255,0))
+        for inst in inst_list:
+            (x1, y1, x2, y2) = inst["box"]
+            conf = inst["conf"]
+            poly = inst["poly"]
+            mask = inst["mask"]
+            label = f"{PPE_NAME.get(cid,'ppe')}:{conf:.2f}"
+
+            # Draw bbox & label
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, label, (x1, max(12, y1-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230,230,230), 1, cv2.LINE_AA)
+
+            drawn = False
+            # polygon fill + outline (preferred)
+            if poly is not None and poly.size > 0:
+                try:
+                    pts = poly.reshape(-1, 2)
+                    # clip coords
+                    pts[:,0] = np.clip(pts[:,0], 0, w-1); pts[:,1] = np.clip(pts[:,1], 0, h-1)
+                    pts_int = pts.astype(np.int32)
+                    cv2.fillPoly(overlay, [pts_int], color)
+                    cv2.polylines(frame, [pts_int], True, color, 2, lineType=cv2.LINE_AA)
+                    drawn = True
+                except Exception:
+                    drawn = False
+
+            # raster mask fallback
+            if not drawn and mask is not None:
+                try:
+                    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        cv2.drawContours(frame, contours, -1, color, 2, lineType=cv2.LINE_AA)          # outlines
+                        cv2.drawContours(overlay, contours, -1, color, thickness=cv2.FILLED, lineType=cv2.LINE_AA)  # filled overlay
+                        drawn = True
+                except Exception:
+                    drawn = False
+
+            # if neither poly nor mask drawn, optionally draw a faint filled bbox
+            if not drawn:
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), color, thickness=cv2.FILLED)
+
+    # blend overlay for semi-transparent fills
+    cv2.addWeighted(overlay, alpha_mask, frame, 1 - alpha_mask, 0, frame)
+    return frame
 
 def check_ppe_for_person_from_boxes(boxes_by_class, person_bbox, landmarks, x_offset, y_offset, crop_w, crop_h):
     flags = {
@@ -298,24 +424,24 @@ def main():
 
                 annotated = frame.copy()
 
+                # Run PPE model and parse both boxes + polys/masks
                 try:
                     ppe_results = yolo_ppe.predict(source=frame, conf=DETECT_CONF, iou=DETECT_IOU, classes=PPE_CLASS_IDS, verbose=False)
                     if len(ppe_results) > 0:
                         r_ppe = ppe_results[0]
                         boxes_by_class = combine_boxes_by_class(r_ppe, img_h, img_w)
+                        instances_by_class = parse_ppe_instances(r_ppe, img_h, img_w)
                     else:
                         boxes_by_class = {cid: [] for cid in PPE_CLASS_IDS}
+                        instances_by_class = {cid: [] for cid in PPE_CLASS_IDS}
                 except Exception as e:
                     boxes_by_class = {cid: [] for cid in PPE_CLASS_IDS}
+                    instances_by_class = {cid: [] for cid in PPE_CLASS_IDS}
 
-                # draw PPE boxes for visualization
-                for cid, boxlist in boxes_by_class.items():
-                    color = PPE_COLORS.get(cid, (0,255,0))
-                    for (bx1, by1, bx2, by2, conf) in boxlist:
-                        cv2.rectangle(annotated, (int(bx1), int(by1)), (int(bx2), int(by2)), color, 2)
-                        cv2.putText(annotated, f"{PPE_NAME.get(cid,'ppe')}:{conf:.2f}", (int(bx1), max(12, int(by1)-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220,220,220), 1, cv2.LINE_AA)
+                # Draw both poly/mask and bbox per instance
+                annotated = draw_ppe_instances_on_frame(annotated, instances_by_class, alpha_mask=0.35)
 
-                # per person -> pose -> check PPE using boxes
+                # per person -> pose -> check PPE using boxes (same as before)
                 for (bbox, conf) in detections:
                     x1, y1, x2, y2 = bbox
                     x1i, y1i, x2i, y2i = expand_bbox((x1, y1, x2, y2), img_w, img_h)
@@ -342,7 +468,6 @@ def main():
                         if not flags.get("right_shoe", False):
                             violations.append("NO RIGHT SHOE")
                     else:
-                        # if no landmarks, check simple bbox overlap for vest/helmet
                         vest_boxes = boxes_by_class.get(4, [])
                         helmet_boxes = boxes_by_class.get(1, [])
                         vest_found = any(iou(person_bbox, (bx1,by1,bx2,by2)) > 0.03 for (bx1,by1,bx2,by2,_) in vest_boxes)
