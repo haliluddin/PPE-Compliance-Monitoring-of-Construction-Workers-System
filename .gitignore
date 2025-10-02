@@ -1,8 +1,10 @@
-﻿data/raw/
-data/processed/
-data/augmented/
-data/yolo/
-data/new/
-models/mask_rcnn_experiments/
-models/mask_rcnn_export/
-efficientdet/output_timm_b3/
+﻿# datasets
+training/data
+# mask rcnn
+training/models
+# efficientdet
+training/efficientdet
+# jupyter
+training/notebook
+# scripts
+training/scripts
