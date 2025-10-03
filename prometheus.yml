@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'triton'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['triton:8002']
+
+  - job_name: 'fastapi'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api:9000']
+
+  - job_name: 'docker-host'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:9323']   # if you run node-exporter locally; optional
