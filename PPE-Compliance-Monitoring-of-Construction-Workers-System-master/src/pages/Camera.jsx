@@ -33,22 +33,18 @@ export default function Camera() {
   }, []);
 
   // Fetch backend status on mount
-    useEffect(() => {
-    const fetchBackendStatus = async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:8000"); // FastAPI URL
-        const data = await res.json();
-        const statusText = data.database
-          ? `${data.message} | DB: ${data.database}`
-          : data.message;
-        setBackendMsg(statusText);
-      } catch (err) {
-        console.error("Backend connection failed:", err);
-        setBackendMsg("Cannot connect to backend ");
-      }
-    };
-    fetchBackendStatus();
-  }, []);
+  useEffect(() => {
+  const fetchBackendStatus = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000");
+      const data = await res.json();
+      setBackendMsg(`${data.message} | DB: ${data.database}`);
+    } catch {
+      setBackendMsg("Cannot connect to backend ❌");
+    }
+  };
+  fetchBackendStatus();
+}, []);
 
 
   const formattedDate = currentTime.toLocaleDateString();

@@ -1,9 +1,16 @@
-export const testBackend = async () => {
-  try {
-    const res = await fetch("http://127.0.0.1:8000/"); // must match FastAPI URL
-    return await res.json();
-  } catch (err) {
-    console.error("Backend connection failed:", err);
-    return { error: "Connection failed" };
+import axios from "axios";
+
+const API = axios.create({
+  baseURL: "http://localhost:8000", // FastAPI backend
+});
+
+// Automatically attach token if available
+API.interceptors.request.use((req) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    req.headers.Authorization = `Bearer ${token}`;
   }
-};
+  return req;
+});
+
+export default API;
