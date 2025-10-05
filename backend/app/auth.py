@@ -1,6 +1,6 @@
 # app/auth.py
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
@@ -62,3 +62,41 @@ async def login(data: LoginSchema, db: AsyncSession = Depends(get_db)):
     token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
 
     return {"access_token": token, "token_type": "bearer"}
+
+
+# -----------------------------
+# Register Schema
+# -----------------------------
+class RegisterSchema(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+# -----------------------------
+# Registration endpoint
+# -----------------------------
+@router.post("/register")
+async def register(data: RegisterSchema, db: AsyncSession = Depends(get_db)):
+    # Check if user already exists
+    result = await db.execute(select(User).where(User.email == data.email))
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Hash the password
+    hashed_password = pwd_context.hash(data.password[:72])
+
+    # Create new user
+    new_user = User(
+        name=data.name,
+        email=data.email,
+        hashed_password=hashed_password,
+        is_supervisor=False  # or True depending on role logic
+    )
+
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    return {"message": "User registered successfully", "user": {"id": new_user.id, "email": new_user.email}}
