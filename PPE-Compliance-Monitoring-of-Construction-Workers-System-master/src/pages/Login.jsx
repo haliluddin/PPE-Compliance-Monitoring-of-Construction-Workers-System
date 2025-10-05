@@ -1,50 +1,61 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(""); // for error messages
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
- const handleSubmit = async (e) => {
-  e.preventDefault();
-  setError("");
-  setLoading(true);
+  const navigate = useNavigate();
 
-  try {
-    const response = await fetch("http://127.0.0.1:8000/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
 
-    let data = {};
     try {
-      data = await response.json();
-    } catch {
-      // Empty response
-      setError("Server returned no data.");
+      const response = await fetch("http://127.0.0.1:8000/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {
+        setError("Server returned no data.");
+        setLoading(false);
+        return;
+      }
+
+      if (!response.ok) {
+        setError(data.detail || "Invalid credentials");
+        setLoading(false);
+        return;
+      }
+
+      // Save token
+      localStorage.setItem("token", data.access_token);
+
+      // Save user info for Header component
+      if (data.user) {
+        localStorage.setItem("user", JSON.stringify(data.user));
+      } else {
+        localStorage.setItem("user", JSON.stringify({ name: "User", email }));
+      }
+
+      // Redirect to camera page
+      navigate("/camera");
+
+    } catch (err) {
+      console.error(err);
+      setError("Network/server error.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    if (!response.ok) {
-      setError(data.detail || "Invalid credentials");
-      return;
-    }
-
-    console.log("Login success:", data);
-    localStorage.setItem("token", data.access_token); // optional: save token
-    window.location.href = "/camera";
-
-  } catch (err) {
-    console.error(err);
-    setError("Network/server error.");
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#1E1F21] p-4">
@@ -56,7 +67,6 @@ export default function Login() {
           </div>
 
           <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {/* Error message */}
             {error && <p className="text-red-500 text-sm text-center">{error}</p>}
 
             <div className="space-y-1">
@@ -67,9 +77,7 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="admin@example.com"
-                className="w-full px-4 py-2.5 bg-[#1E1F21] border border-gray-700 rounded-lg 
-                           text-white placeholder-gray-500 focus:outline-none 
-                           focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all"
+                className="w-full px-4 py-2.5 bg-[#1E1F21] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all"
               />
             </div>
 
@@ -86,19 +94,16 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full px-4 py-2.5 bg-[#1E1F21] border border-gray-700 rounded-lg 
-                           text-white placeholder-gray-500 focus:outline-none 
-                           focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all"
+                className="w-full px-4 py-2.5 bg-[#1E1F21] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className={`w-full py-2.5 px-4 bg-[#5388DF] text-white font-medium 
-                         rounded-lg hover:bg-[#3a6fc5] transition-colors ${
-                           loading ? "opacity-50 cursor-not-allowed" : ""
-                         }`}
+              className={`w-full py-2.5 px-4 bg-[#5388DF] text-white font-medium rounded-lg hover:bg-[#3a6fc5] transition-colors ${
+                loading ? "opacity-50 cursor-not-allowed" : ""
+              }`}
             >
               {loading ? "Signing in..." : "Sign In"}
             </button>
@@ -109,7 +114,7 @@ export default function Login() {
                 href="/register"
                 onClick={(e) => {
                   e.preventDefault();
-                  window.location.href = "/register";
+                  navigate("/register");
                 }}
                 className="text-[#5388DF] hover:underline"
               >

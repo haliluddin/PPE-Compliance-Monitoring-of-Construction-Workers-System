@@ -49,19 +49,42 @@ export default function Register() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (validateForm()) {
-      console.log("Registration data:", formData);
-      // Clear any stored form state
-      window.history.replaceState({}, document.title, "/login");
-      // Navigate to login
-      window.location.href = '/login';
+  const handleSubmit = async (e) => {
+  e.preventDefault();
+  if (!validateForm()) return;
+
+  try {
+    const response = await fetch("http://127.0.0.1:8000/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setErrors({ general: data.detail || "Registration failed" });
+      return;
     }
-  };
+
+    alert("Registration successful!");
+    window.location.href = "/login";
+
+  } catch (err) {
+    console.error("Error:", err);
+    setErrors({ general: "Server error. Please try again later." });
+  }
+};
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#1E1F21] p-4">
+    {errors.general && <p className="text-red-500 text-sm text-center">{errors.general}</p>}
+
       <div className="w-full max-w-md">
         <div className="bg-[#2A2B30] rounded-xl shadow-2xl overflow-hidden border border-gray-700">
           <div className="px-8 py-6 border-b border-gray-700">
