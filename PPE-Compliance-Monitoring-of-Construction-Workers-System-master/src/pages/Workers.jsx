@@ -16,7 +16,6 @@ export default function Workers() {
     role: "",
     dateAdded: new Date().toISOString().split("T")[0],
     status: "Active",
-    registered: false, // new field
   });
 
   // Fetch workers from backend
@@ -35,11 +34,8 @@ export default function Workers() {
 
   // Handle form input
   const handleInputChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setNewWorker((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    const { name, value } = e.target;
+    setNewWorker((prev) => ({ ...prev, [name]: value }));
   };
 
   // Add new worker
@@ -55,7 +51,6 @@ export default function Workers() {
         role: "",
         dateAdded: new Date().toISOString().split("T")[0],
         status: "Active",
-        registered: false,
       });
       setIsAddWorkerModalOpen(false);
     } catch (error) {
@@ -216,16 +211,6 @@ export default function Workers() {
                       <option value="On Leave">On Leave</option>
                     </select>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      name="registered"
-                      checked={newWorker.registered}
-                      onChange={handleInputChange}
-                      className="accent-[#5388DF]"
-                    />
-                    <label className="text-gray-300 text-sm">Registered</label>
-                  </div>
                 </div>
               </div>
 
@@ -252,12 +237,11 @@ export default function Workers() {
       )}
 
       {/* Workers Table */}
-      <div className="grid grid-cols-6 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
+      <div className="grid grid-cols-5 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Worker Code</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Name</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Last Seen</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Total Incidents</div>
-        <div className="bg-[#19325C] px-4 py-2 rounded-lg">Registered</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg text-center">Action</div>
       </div>
 
@@ -265,7 +249,7 @@ export default function Workers() {
         {currentItems.map((w) => (
           <div
             key={w.id}
-            className="grid grid-cols-6 gap-4 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-shadow items-center"
+            className="grid grid-cols-5 gap-4 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-shadow items-center"
           >
             <div className="flex items-center gap-2 font-medium text-gray-200">
               <FaUserAlt className="text-[#5388DF]" />
@@ -274,7 +258,6 @@ export default function Workers() {
             <div className="text-gray-200">{w.fullName}</div>
             <div className="text-gray-300">{w.lastSeen || "-"}</div>
             <div>{w.totalIncidents || 0}</div>
-            <div>{w.registered ? "Yes" : "No"}</div>
             <div className="text-center">
               <Link
                 to={`/workersprofile/${w.id}`}
