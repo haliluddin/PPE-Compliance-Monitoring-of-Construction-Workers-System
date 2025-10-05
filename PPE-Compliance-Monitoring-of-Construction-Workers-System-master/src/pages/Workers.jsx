@@ -1,65 +1,81 @@
-import { FaUserAlt, FaEye, FaPlus, FaSearch, FaTimes, FaUpload, FaUserPlus  } from "react-icons/fa";
-import { useState } from "react";
+import { FaUserAlt, FaEye, FaPlus, FaSearch, FaTimes } from "react-icons/fa";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import API from "../api";
 
 export default function Workers() {
   const [query, setQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(5);
-
-  const workers = [
-    { id: "1", name: "Juan Dela Cruz", lastSeen: "2025-09-27 10:45 AM", totalIncidents: 3 },
-    { id: "2", name: "Maria Santos", lastSeen: "2025-09-27 9:20 AM", totalIncidents: 0 },
-    { id: "3", name: "Carlos Reyes", lastSeen: "2025-09-26 5:10 PM", totalIncidents: 1 },
-  ];
-
-  const filtered = workers.filter(
-    (w) =>
-      w.name.toLowerCase().includes(query.toLowerCase()) ||
-      w.id.toLowerCase().includes(query.toLowerCase())
-  );
-
+  const [workers, setWorkers] = useState([]);
   const [isAddWorkerModalOpen, setIsAddWorkerModalOpen] = useState(false);
   const [newWorker, setNewWorker] = useState({
-    fullName: '',
-    workerNumber: '',
-    assignedLocation: '',
-    role: '',
-    dateAdded: new Date().toISOString().split('T')[0], // Today's date as default
-    status: 'Active'
+    fullName: "",
+    workerNumber: "",
+    assignedLocation: "",
+    role: "",
+    dateAdded: new Date().toISOString().split("T")[0],
+    status: "Active",
   });
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setNewWorker(prev => ({ ...prev, [name]: value }));
+  // Fetch workers from backend
+  const fetchWorkers = async () => {
+    try {
+      const res = await API.get("/workers");
+      setWorkers(res.data);
+    } catch (error) {
+      console.error("Failed to fetch workers:", error);
+    }
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    //  add the worker
-    console.log('New worker data:', newWorker);
-    // Reset form
-    setNewWorker({
-      fullName: '',
-      workerNumber: '',
-      assignedLocation: '',
-      role: '',
-      dateAdded: new Date().toISOString().split('T')[0],
-      status: 'Active'
-    });
-    setIsAddWorkerModalOpen(false);
+  useEffect(() => {
+    fetchWorkers();
+  }, []);
+
+  // Handle form input
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setNewWorker((prev) => ({ ...prev, [name]: value }));
   };
-  
+
+  // Add new worker
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await API.post("/workers", newWorker);
+      setWorkers((prev) => [...prev, res.data]);
+      setNewWorker({
+        fullName: "",
+        workerNumber: "",
+        assignedLocation: "",
+        role: "",
+        dateAdded: new Date().toISOString().split("T")[0],
+        status: "Active",
+      });
+      setIsAddWorkerModalOpen(false);
+    } catch (error) {
+      console.error("Failed to add worker:", error);
+      alert(error.response?.data?.detail || "Failed to add worker");
+    }
+  };
+
+  // -------------------------
+  // Filter & Pagination
+  // -------------------------
+  const filtered = workers.filter(
+    (w) =>
+      w.fullName.toLowerCase().includes(query.toLowerCase()) ||
+      w.workerNumber.toLowerCase().includes(query.toLowerCase())
+  );
+
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentItems = filtered.slice(indexOfFirstItem, indexOfLastItem);
 
-
-
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
-      {/* ---------- Page Header ---------- */}
+      {/* Page Header */}
       <header className="bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg mb-8 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-100">Worker Management</h1>
         <div className="flex items-center space-x-2 text-gray-300">
@@ -68,9 +84,9 @@ export default function Workers() {
         </div>
       </header>
 
-      {/* ---------- Action Bar ---------- */}
+      {/* Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
-        {/* Search box */}
+        {/* Search */}
         <div className="relative w-64">
           <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
@@ -84,172 +100,147 @@ export default function Workers() {
 
         {/* Add Worker Button */}
         <button
-          className="inline-flex items-center justify-center px-5 py-3 text-sm font-medium text-white
-                    bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors"
+          className="inline-flex items-center justify-center px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors"
           onClick={() => setIsAddWorkerModalOpen(true)}
         >
           <FaPlus className="mr-2" />
           Add Worker
         </button>
-        
-       {/* Add Worker Modal */}
-        {isAddWorkerModalOpen && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-[#1E1F21] rounded-xl w-full max-w-2xl border border-gray-700 shadow-2xl overflow-hidden">
-              {/* Modal Header */}
-              <div className="px-6 py-5 border-b border-gray-700">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xl font-semibold text-white">Add New Worker</h3>
-                    <p className="text-sm text-gray-400 mt-1">Fill in the worker's details below</p>
+      </div>
+
+      {/* Add Worker Modal */}
+      {isAddWorkerModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#1E1F21] rounded-xl w-full max-w-2xl border border-gray-700 shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-5 border-b border-gray-700 flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-semibold text-white">Add New Worker</h3>
+                <p className="text-sm text-gray-400 mt-1">Fill in the worker's details below</p>
+              </div>
+              <button
+                onClick={() => setIsAddWorkerModalOpen(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-gray-700/50 transition-colors"
+              >
+                <FaTimes className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Personal Info */}
+                <div className="space-y-5">
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-300">Full Name</label>
+                    <input
+                      type="text"
+                      name="fullName"
+                      value={newWorker.fullName}
+                      onChange={handleInputChange}
+                      placeholder="Juan Dela Cruz"
+                      className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
+                      required
+                    />
                   </div>
-                  <button 
-                    onClick={() => setIsAddWorkerModalOpen(false)}
-                    className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-gray-700/50 transition-colors"
-                    aria-label="Close"
-                  >
-                    <FaTimes className="h-5 w-5" />
-                  </button>
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-300">Worker Number</label>
+                    <input
+                      type="text"
+                      name="workerNumber"
+                      value={newWorker.workerNumber}
+                      onChange={handleInputChange}
+                      placeholder="[Vest No] 1"
+                      className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-300">Assigned Location</label>
+                    <input
+                      type="text"
+                      name="assignedLocation"
+                      value={newWorker.assignedLocation}
+                      onChange={handleInputChange}
+                      placeholder="Camera 5 – Ground Floor"
+                      className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Work Info */}
+                <div className="space-y-5">
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-300">Role</label>
+                    <select
+                      name="role"
+                      value={newWorker.role}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#5388DF] appearance-none"
+                      required
+                    >
+                      <option value="">Select Role</option>
+                      <option value="Welder">Welder</option>
+                      <option value="Operator">Operator</option>
+                      <option value="Carpenter">Carpenter</option>
+                      <option value="Electrician">Electrician</option>
+                      <option value="Plumber">Plumber</option>
+                      <option value="Laborer">Laborer</option>
+                      <option value="Foreman">Foreman</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-300">Date Added</label>
+                    <input
+                      type="date"
+                      name="dateAdded"
+                      value={newWorker.dateAdded}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-300">Status</label>
+                    <select
+                      name="status"
+                      value={newWorker.status}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#5388DF] appearance-none"
+                      required
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                      <option value="On Leave">On Leave</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-              
-              {/* Modal Body */}
-              <form onSubmit={handleSubmit} className="p-6">
-                <div className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Personal Information */}
-                    <div className="space-y-5">
-                      <div className="space-y-1">
-                        <label className="block text-sm font-medium text-gray-300">Full Name</label>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            name="fullName"
-                            value={newWorker.fullName}
-                            onChange={handleInputChange}
-                            placeholder="Juan Dela Cruz"
-                            className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all"
-                            required
-                          />
-                        </div>
-                      </div>
 
-                      <div className="space-y-1">
-                        <label className="block text-sm font-medium text-gray-300">Worker Number</label>
-                        <input
-                          type="text"
-                          name="workerNumber"
-                          value={newWorker.workerNumber}
-                          onChange={handleInputChange}
-                          placeholder="[Vest No] 1"
-                          className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all"
-                          required
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block text-sm font-medium text-gray-300">Assigned Location</label>
-                        <input
-                          type="text"
-                          name="assignedLocation"
-                          value={newWorker.assignedLocation}
-                          onChange={handleInputChange}
-                          placeholder="Camera 5 – Ground Floor"
-                          className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all"
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    {/* Work Information */}
-                    <div className="space-y-5">
-                      <div className="space-y-1">
-                        <label className="block text-sm font-medium text-gray-300">Role</label>
-                        <select
-                          name="role"
-                          value={newWorker.role}
-                          onChange={handleInputChange}
-                          className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent appearance-none"
-                          style={{
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239CA3AF'%3E%3Cpath strokeLinecap='round' strokeLinejoin='round' strokeWidth='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                            backgroundRepeat: 'no-repeat',
-                            backgroundPosition: 'right 1rem center',
-                            backgroundSize: '1.25em 1.25em'
-                          }}
-                          required
-                        >
-                          <option value="">Select Role</option>
-                          <option value="Welder">Welder</option>
-                          <option value="Operator">Operator</option>
-                          <option value="Carpenter">Carpenter</option>
-                          <option value="Electrician">Electrician</option>
-                          <option value="Plumber">Plumber</option>
-                          <option value="Laborer">Laborer</option>
-                          <option value="Foreman">Foreman</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block text-sm font-medium text-gray-300">Date Added</label>
-                        <input
-                          type="date"
-                          name="dateAdded"
-                          value={newWorker.dateAdded}
-                          onChange={handleInputChange}
-                          className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent"
-                          required
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block text-sm font-medium text-gray-300">Status</label>
-                        <select
-                          name="status"
-                          value={newWorker.status}
-                          onChange={handleInputChange}
-                          className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent appearance-none"
-                          style={{
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239CA3AF'%3E%3Cpath strokeLinecap='round' strokeLinejoin='round' strokeWidth='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                            backgroundRepeat: 'no-repeat',
-                            backgroundPosition: 'right 1rem center',
-                            backgroundSize: '1.25em 1.25em'
-                          }}
-                          required
-                        >
-                          <option value="Active">Active</option>
-                          <option value="Inactive">Inactive</option>
-                          <option value="On Leave">On Leave</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Form Actions */}
-                  <div className="flex justify-end space-x-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setIsAddWorkerModalOpen(false)}
-                      className="px-5 py-2.5 text-sm font-medium text-gray-300 bg-transparent border border-gray-600 rounded-lg hover:bg-gray-700/50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2.5 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#3a6fc5] transition-colors flex items-center justify-center"
-                    >
-                      <FaPlus className="mr-2" />
-                      Add Worker
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </div>
+              {/* Form Actions */}
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsAddWorkerModalOpen(false)}
+                  className="px-5 py-2.5 text-sm font-medium text-gray-300 bg-transparent border border-gray-600 rounded-lg hover:bg-gray-700/50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#3a6fc5] flex items-center justify-center"
+                >
+                  <FaPlus className="mr-2" />
+                  Add Worker
+                </button>
+              </div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-
-      </div>
-      
+      {/* Workers Table */}
       <div className="grid grid-cols-5 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Worker No.</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Name</div>
@@ -258,7 +249,6 @@ export default function Workers() {
         <div className="bg-[#19325C] px-4 py-2 rounded-lg text-center">Action</div>
       </div>
 
-      {/* ---------- Cards ---------- */}
       <div className="space-y-3">
         {currentItems.map((w) => (
           <div
@@ -267,43 +257,31 @@ export default function Workers() {
           >
             <div className="flex items-center gap-2 font-medium text-gray-200">
               <FaUserAlt className="text-[#5388DF]" />
-              {w.id}
+              {w.workerNumber}
             </div>
-
-            <div className="text-gray-200">{w.name}</div>
-            <div className="text-gray-300">{w.lastSeen}</div>
-
-            <div>
-              {w.totalIncidents === 0 ? (
-                <span className="text-green-500 font-medium">0</span>
-              ) : (
-                <span className="text-red-500 font-semibold">
-                  {w.totalIncidents}
-                </span>
-              )}
-            </div>
-
+            <div className="text-gray-200">{w.fullName}</div>
+            <div className="text-gray-300">{w.lastSeen || "-"}</div>
+            <div>{w.totalIncidents || 0}</div>
             <div className="text-center">
-              <Link to={`/workersprofile/${w.id}`}
-                    className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
+              <Link
+                to={`/workersprofile/${w.id}`}
+                className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C]"
+              >
                 <FaEye className="mr-2" />
                 View Profile
               </Link>
             </div>
           </div>
         ))}
-
-        {filtered.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No workers found.</p>
-        )}
+        {filtered.length === 0 && <p className="text-gray-500 text-sm mt-4">No workers found.</p>}
       </div>
 
-      {/* ---------- Pagination ---------- */}
+      {/* Pagination */}
       <div className="flex justify-center mt-6 space-x-2">
         <button
           onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
           disabled={currentPage === 1}
-          className="px-4 py-2 bg-[#2A2B30] text-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#19325C] transition"
+          className="px-4 py-2 bg-[#2A2B30] text-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#19325C]"
         >
           Previous
         </button>
@@ -311,7 +289,9 @@ export default function Workers() {
           <button
             key={i + 1}
             onClick={() => setCurrentPage(i + 1)}
-            className={`px-4 py-2 rounded-lg ${currentPage === i + 1 ? 'bg-[#5388DF] text-white' : 'bg-[#2A2B30] text-gray-200 hover:bg-[#19325C]'} transition`}
+            className={`px-4 py-2 rounded-lg ${
+              currentPage === i + 1 ? "bg-[#5388DF] text-white" : "bg-[#2A2B30] text-gray-200 hover:bg-[#19325C]"
+            }`}
           >
             {i + 1}
           </button>
@@ -319,7 +299,7 @@ export default function Workers() {
         <button
           onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
           disabled={currentPage === totalPages}
-          className="px-4 py-2 bg-[#2A2B30] text-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#19325C] transition"
+          className="px-4 py-2 bg-[#2A2B30] text-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#19325C]"
         >
           Next
         </button>
