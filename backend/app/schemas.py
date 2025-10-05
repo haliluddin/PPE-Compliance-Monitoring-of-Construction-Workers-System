@@ -17,21 +17,23 @@ class UserOut(BaseModel):
 
 class WorkerCreate(BaseModel):
     fullName: str
-    workerNumber: str
+    worker_code: str
     assignedLocation: str
     role: str
     dateAdded: date
     status: str
+    registered: bool = False  
 
-class WorkerOut(WorkerCreate):
+class WorkerResponse(BaseModel):
     id: int
+    fullName: str
+    worker_code: str
+    assignedLocation: str
+    role: str
+    dateAdded: date
+    status: str
+    registered: bool  # include in response
     user_id: int
 
-    class Config:
-        orm_mode = True
-
-
-class WorkerResponse(WorkerCreate):
-    id: int
     class Config:
         orm_mode = True
