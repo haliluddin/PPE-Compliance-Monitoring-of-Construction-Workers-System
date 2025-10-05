@@ -11,11 +11,12 @@ export default function Workers() {
   const [isAddWorkerModalOpen, setIsAddWorkerModalOpen] = useState(false);
   const [newWorker, setNewWorker] = useState({
     fullName: "",
-    workerNumber: "",
+    worker_code: "",
     assignedLocation: "",
     role: "",
     dateAdded: new Date().toISOString().split("T")[0],
     status: "Active",
+    registered: false, // new field
   });
 
   // Fetch workers from backend
@@ -34,8 +35,11 @@ export default function Workers() {
 
   // Handle form input
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setNewWorker((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = e.target;
+    setNewWorker((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
 
   // Add new worker
@@ -46,11 +50,12 @@ export default function Workers() {
       setWorkers((prev) => [...prev, res.data]);
       setNewWorker({
         fullName: "",
-        workerNumber: "",
+        worker_code: "",
         assignedLocation: "",
         role: "",
         dateAdded: new Date().toISOString().split("T")[0],
         status: "Active",
+        registered: false,
       });
       setIsAddWorkerModalOpen(false);
     } catch (error) {
@@ -59,13 +64,11 @@ export default function Workers() {
     }
   };
 
-  // -------------------------
   // Filter & Pagination
-  // -------------------------
   const filtered = workers.filter(
     (w) =>
       w.fullName.toLowerCase().includes(query.toLowerCase()) ||
-      w.workerNumber.toLowerCase().includes(query.toLowerCase())
+      w.worker_code.toLowerCase().includes(query.toLowerCase())
   );
 
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
@@ -112,7 +115,6 @@ export default function Workers() {
       {isAddWorkerModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-[#1E1F21] rounded-xl w-full max-w-2xl border border-gray-700 shadow-2xl overflow-hidden">
-            {/* Modal Header */}
             <div className="px-6 py-5 border-b border-gray-700 flex justify-between items-center">
               <div>
                 <h3 className="text-xl font-semibold text-white">Add New Worker</h3>
@@ -126,7 +128,6 @@ export default function Workers() {
               </button>
             </div>
 
-            {/* Modal Body */}
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Personal Info */}
@@ -144,11 +145,11 @@ export default function Workers() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-sm font-medium text-gray-300">Worker Number</label>
+                    <label className="block text-sm font-medium text-gray-300">Worker Code</label>
                     <input
                       type="text"
-                      name="workerNumber"
-                      value={newWorker.workerNumber}
+                      name="worker_code"
+                      value={newWorker.worker_code}
                       onChange={handleInputChange}
                       placeholder="[Vest No] 1"
                       className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
@@ -215,6 +216,16 @@ export default function Workers() {
                       <option value="On Leave">On Leave</option>
                     </select>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      name="registered"
+                      checked={newWorker.registered}
+                      onChange={handleInputChange}
+                      className="accent-[#5388DF]"
+                    />
+                    <label className="text-gray-300 text-sm">Registered</label>
+                  </div>
                 </div>
               </div>
 
@@ -241,11 +252,12 @@ export default function Workers() {
       )}
 
       {/* Workers Table */}
-      <div className="grid grid-cols-5 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
-        <div className="bg-[#19325C] px-4 py-2 rounded-lg">Worker No.</div>
+      <div className="grid grid-cols-6 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
+        <div className="bg-[#19325C] px-4 py-2 rounded-lg">Worker Code</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Name</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Last Seen</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg">Total Incidents</div>
+        <div className="bg-[#19325C] px-4 py-2 rounded-lg">Registered</div>
         <div className="bg-[#19325C] px-4 py-2 rounded-lg text-center">Action</div>
       </div>
 
@@ -253,15 +265,16 @@ export default function Workers() {
         {currentItems.map((w) => (
           <div
             key={w.id}
-            className="grid grid-cols-5 gap-4 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-shadow items-center"
+            className="grid grid-cols-6 gap-4 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-shadow items-center"
           >
             <div className="flex items-center gap-2 font-medium text-gray-200">
               <FaUserAlt className="text-[#5388DF]" />
-              {w.workerNumber}
+              {w.worker_code}
             </div>
             <div className="text-gray-200">{w.fullName}</div>
             <div className="text-gray-300">{w.lastSeen || "-"}</div>
             <div>{w.totalIncidents || 0}</div>
+            <div>{w.registered ? "Yes" : "No"}</div>
             <div className="text-center">
               <Link
                 to={`/workersprofile/${w.id}`}
