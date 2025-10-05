@@ -26,6 +26,6 @@ RUN apt-get update && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY app_triton_http.py /app/app_triton_http.py
+COPY /app /app
 
 CMD ["uvicorn", "app_triton_http:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "1"]

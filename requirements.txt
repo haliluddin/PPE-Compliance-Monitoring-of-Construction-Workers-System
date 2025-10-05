@@ -6,3 +6,11 @@ opencv-python-headless
 pillow
 python-multipart
 prometheus_client
+celery[redis]
+mediapipe
+redis
+psycopg2-binary
+sqlalchemy
+python-dotenv
+easyocr
+torch           
