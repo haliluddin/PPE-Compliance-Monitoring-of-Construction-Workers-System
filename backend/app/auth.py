@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = "supersecretkey"  # Change this in production
+SECRET_KEY = "supersecretkey"  
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 2
 
@@ -51,7 +51,7 @@ async def authenticate_user(email: str, password: str, db: AsyncSession):
 # -----------------------------
 # Login endpoint
 # -----------------------------
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 async def login(data: LoginSchema, db: AsyncSession = Depends(get_db)):
     user = await authenticate_user(data.email, data.password, db)
     if not user:
@@ -61,8 +61,14 @@ async def login(data: LoginSchema, db: AsyncSession = Depends(get_db)):
     token_data = {"sub": user.email, "exp": expire}
     token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
 
-    return {"access_token": token, "token_type": "bearer"}
-
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "name": user.name,
+            "email": user.email
+        }
+    }
 
 # -----------------------------
 # Register Schema
@@ -92,7 +98,7 @@ async def register(data: RegisterSchema, db: AsyncSession = Depends(get_db)):
         name=data.name,
         email=data.email,
         hashed_password=hashed_password,
-        is_supervisor=False  # or True depending on role logic
+        is_supervisor=True 
     )
 
     db.add(new_user)
