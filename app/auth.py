@@ -1,14 +1,15 @@
-# app/auth.py
+
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -18,6 +19,7 @@ ACCESS_TOKEN_EXPIRE_HOURS = 2
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
+
 # -----------------------------
 # Pydantic Schemas
 # -----------------------------
@@ -25,14 +27,17 @@ class LoginSchema(BaseModel):
     email: str
     password: str
 
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
 
 class RegisterSchema(BaseModel):
     name: str
     email: EmailStr
     password: str
+
 
 # -----------------------------
 # Password utilities
@@ -40,25 +45,28 @@ class RegisterSchema(BaseModel):
 def hash_password(password: str) -> str:
     return pwd_context.hash(password[:72])
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password[:72], hashed_password)
+
 
 # -----------------------------
 # User authentication
 # -----------------------------
-async def authenticate_user(email: str, password: str, db: AsyncSession):
-    result = await db.execute(select(User).where(User.email == email))
+def authenticate_user(email: str, password: str, db: Session):
+    result = db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if not user or not verify_password(password, user.hashed_password):
         return None
     return user
 
+
 # -----------------------------
 # Login endpoint
 # -----------------------------
 @router.post("/login")
-async def login(data: LoginSchema, db: AsyncSession = Depends(get_db)):
-    user = await authenticate_user(data.email, data.password, db)
+def login(data: LoginSchema, db: Session = Depends(get_db)):
+    user = authenticate_user(data.email, data.password, db)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -76,12 +84,13 @@ async def login(data: LoginSchema, db: AsyncSession = Depends(get_db)):
         }
     }
 
+
 # -----------------------------
 # Registration endpoint
 # -----------------------------
 @router.post("/register")
-async def register(data: RegisterSchema, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == data.email))
+def register(data: RegisterSchema, db: Session = Depends(get_db)):
+    result = db.execute(select(User).where(User.email == data.email))
     existing_user = result.scalar_one_or_none()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -92,12 +101,12 @@ async def register(data: RegisterSchema, db: AsyncSession = Depends(get_db)):
         name=data.name,
         email=data.email,
         hashed_password=hashed_password,
-        is_supervisor=True  # adjust based on role logic
+        is_supervisor=True  # adjust based on your role logic
     )
 
     db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
+    db.commit()
+    db.refresh(new_user)
 
     return {
         "message": "User registered successfully",
@@ -108,10 +117,11 @@ async def register(data: RegisterSchema, db: AsyncSession = Depends(get_db)):
         }
     }
 
+
 # -----------------------------
 # Dependency: Get current logged-in user
 # -----------------------------
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
@@ -120,7 +130,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    result = db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
