@@ -1,4 +1,0 @@
-# Ignore backend virtual environment
-venv/
-__pycache__/
-*.pyc
