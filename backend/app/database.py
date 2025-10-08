@@ -3,16 +3,12 @@ from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = "postgresql+asyncpg://postgres:ppe@localhost:5432/ppe_compliance"
 
-# Async engine
 engine = create_async_engine(DATABASE_URL, echo=True, future=True)
 
-# Async session factory
 SessionLocal = sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
+    expire_on_commit=False
 )
 
 # Dependency for FastAPI

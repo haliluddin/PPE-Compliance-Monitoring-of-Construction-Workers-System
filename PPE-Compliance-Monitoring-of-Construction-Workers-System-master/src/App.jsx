@@ -9,37 +9,42 @@ import Workers from "./pages/Workers";
 import Reports from "./pages/Reports";
 import WorkersProfile from "./pages/WorkersProfile";
 import Register from "./pages/Register";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
     <Routes>
-      {/* Login page */}
+      {/* Redirect root to login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
-      
+
+      {/* Public routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      {/*pages with sidebar */}
+
+      {/* Protected routes */}
       <Route
         path="/*"
         element={
-          <div className="flex">
-            <Sidebar />
-            <div className="flex-1 bg-[#1E1F23] min-h-screen">
-              <Header />
+          <ProtectedRoute>
+            <div className="flex">
+              <Sidebar />
+              <div className="flex-1 bg-[#1E1F23] min-h-screen">
+                <Header />
 
-              <div className="p-6 bg-[#1E1F23] rounded-lg m-4 text-gray-100">
-                <Routes>
-                  <Route path="camera" element={<Camera />} />
-                  <Route path="notifications" element={<Notifications />} />
-                  <Route path="incidents" element={<Incidents />} />
-                  <Route path="workers" element={<Workers />} />
-                  <Route path="reports" element={<Reports />} />
-                  <Route path="workersprofile/:id" element={<WorkersProfile />} />
-                  <Route path="*" element={<Navigate to="camera" replace />} />
-                </Routes>
+                <div className="p-6 bg-[#1E1F23] rounded-lg m-4 text-gray-100">
+                  <Routes>
+                    <Route path="camera" element={<Camera />} />
+                    <Route path="notifications" element={<Notifications />} />
+                    <Route path="incidents" element={<Incidents />} />
+                    <Route path="workers" element={<Workers />} />
+                    <Route path="reports" element={<Reports />} />
+                    <Route path="workersprofile/:id" element={<WorkersProfile />} />
+                    <Route path="*" element={<Navigate to="camera" replace />} />
+                  </Routes>
+                </div>
               </div>
             </div>
-          </div>
+          </ProtectedRoute>
         }
       />
     </Routes>
