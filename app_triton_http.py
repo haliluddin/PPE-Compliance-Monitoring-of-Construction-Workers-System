@@ -43,14 +43,14 @@ app.add_middleware(
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
+HUMAN_MODEL = os.environ.get("HUMAN_MODEL_NAME", "person_yolo")
 TRITON_URL = os.environ.get("TRITON_URL", "triton:8000")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 WS_CHANNEL = os.environ.get("WS_CHANNEL", "ppe_results")
 tmp_upload_dir = os.environ.get("UPLOAD_DIR", "/tmp/uploads")
 os.makedirs(tmp_upload_dir, exist_ok=True)
 triton = None
-input_name = None
-output_names = None
+triton_models_meta = {}
 redis_sync = None
 redis_pubsub = None
 ws_clients = set()
@@ -67,9 +67,20 @@ def sanitize_triton_url(url: str) -> str:
         return p.netloc or p.path
     return url
 
+def load_model_metadata(client, model_name):
+    try:
+        meta = client.get_model_metadata(model_name)
+        inp = meta.get('inputs', [])
+        outs = meta.get('outputs', [])
+        input_name = inp[0]['name'] if inp else None
+        output_names = [o['name'] for o in outs] if outs else []
+        return {'input_name': input_name, 'output_names': output_names}
+    except Exception:
+        return {'input_name': None, 'output_names': []}
+
 @app.on_event("startup")
 def startup_event():
-    global triton, input_name, output_names, redis_sync, redis_pubsub
+    global triton, triton_models_meta, redis_sync, redis_pubsub
     raw_url = TRITON_URL
     triton_url = sanitize_triton_url(raw_url)
     max_wait = int(os.environ.get("TRITON_WAIT_SECS", "120"))
@@ -80,15 +91,16 @@ def startup_event():
             client = InferenceServerClient(url=triton_url)
         except Exception:
             triton = None
-            input_name = None
-            output_names = None
+            triton_models_meta = {}
             break
         try:
             if client.is_server_live() and client.is_server_ready():
                 triton = client
-                meta = triton.get_model_metadata(TRITON_MODEL)
-                input_name = meta['inputs'][0]['name'] if meta.get('inputs') else None
-                output_names = [o['name'] for o in meta.get('outputs', [])]
+                for model in [TRITON_MODEL, HUMAN_MODEL]:
+                    try:
+                        triton_models_meta[model] = load_model_metadata(triton, model)
+                    except Exception:
+                        triton_models_meta[model] = {'input_name': None, 'output_names': []}
                 break
             try:
                 if hasattr(client, "close"):
@@ -353,7 +365,7 @@ async def infer(file: UploadFile = File(...), camera_id: int = None, job_id: int
 @app.post("/infer_sync")
 async def infer_sync(file: UploadFile = File(...)):
     INFER_REQUESTS.inc()
-    global triton, input_name, output_names, TRITON_MODEL
+    global triton, TRITON_MODEL
     if triton is None:
         raise HTTPException(status_code=503, detail="Triton server not ready")
     data = await file.read()
@@ -364,6 +376,11 @@ async def infer_sync(file: UploadFile = File(...)):
     img = cv2.resize(img, (416, 416))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype("float32")
     img = np.transpose(img, (2, 0, 1))[None, ...]
+    meta = triton_models_meta.get(TRITON_MODEL, {})
+    input_name = meta.get('input_name')
+    output_names = meta.get('output_names', [])
+    if not input_name or not output_names:
+        raise HTTPException(status_code=503, detail="Model metadata not available")
     inp = InferInput(input_name, img.shape, "FP32")
     inp.set_data_from_numpy(img)
     outputs = [InferRequestedOutput(n) for n in output_names]

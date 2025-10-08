@@ -1,0 +1,6 @@
+name: "person_yolo"
+platform: "onnxruntime_onnx"
+max_batch_size: 0
+instance_group [
+  { kind: KIND_GPU }
+]
