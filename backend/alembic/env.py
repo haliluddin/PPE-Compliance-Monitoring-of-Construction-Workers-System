@@ -8,7 +8,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from app.models import Base  # Import your Base from models.py
+from app.models import Base
 from app.database import DATABASE_URL
 
 config = context.config
