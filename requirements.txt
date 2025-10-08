@@ -1,3 +1,4 @@
+# requirements.txt
 fastapi
 uvicorn[standard]
 tritonclient[http]
@@ -13,4 +14,4 @@ psycopg2-binary
 sqlalchemy
 python-dotenv
 easyocr
-torch           
+ultralytics

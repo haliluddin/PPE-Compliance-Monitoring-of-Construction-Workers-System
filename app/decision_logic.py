@@ -1,3 +1,4 @@
+# app/decision_logic.py
 import cv2
 import re
 import time
@@ -45,72 +46,38 @@ def parse_triton_outputs(outputs, H, W):
     if not arrays:
         return out, people
     arr = arrays[0]
-    if arr.ndim != 2 or arr.shape[0] == 0:
-        return out, people
-    if arr.shape[1] == 6:
-        for row in arr:
-            x1,y1,x2,y2,conf,cls = row
-            cls = int(cls)
-            if max(x1,x2,y1,y2) <= 1.01:
-                x1 *= W; x2 *= W; y1 *= H; y2 *= H
-            x1c = max(0.0,float(x1)); y1c = max(0.0,float(y1)); x2c = min(W-1.0,float(x2)); y2c = min(H-1.0,float(y2))
-            if cls in PPE_CLASS_IDS:
-                out[cls].append((x1c,y1c,x2c,y2c,float(conf)))
-            else:
-                if cls == 0:
-                    people.append((x1c,y1c,x2c,y2c,float(conf)))
-        return out, people
-    if arr.shape[1] == 85 or arr.shape[1] > 6:
-        for row in arr:
-            x,y,w,h,conf = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4])
-            probs = row[5:]
-            if probs.size>0:
-                cls = int(np.argmax(probs))
-                cls_conf = float(probs[cls])
-            else:
-                cls = int(row[-1]) if row.size>5 else -1
-                cls_conf = 1.0
-            final_conf = float(conf*cls_conf)
-            if max(x,y,w,h) <= 1.01:
-                cx = x * W; cy = y * H; ww = w * W; hh = h * H
-            else:
-                cx = x; cy = y; ww = w; hh = h
-            x1 = cx - ww/2; y1 = cy - hh/2; x2 = cx + ww/2; y2 = cy + hh/2
-            x1c = max(0.0,x1); y1c = max(0.0,y1); x2c = min(W-1.0,x2); y2c = min(H-1.0,y2)
-            if cls in PPE_CLASS_IDS:
-                out[cls].append((x1c,y1c,x2c,y2c,final_conf))
-            else:
-                if cls == 0:
-                    people.append((x1c,y1c,x2c,y2c,final_conf))
-        return out, people
-    if arr.shape[1] == 4 and len(arrays) >= 3:
-        boxes = arrays[0]; scores = arrays[1].reshape(-1); classes = arrays[2].reshape(-1)
-        for (x1,y1,x2,y2),conf,cls in zip(boxes,scores,classes):
-            cls = int(cls)
-            if max(x1,x2,y1,y2) <= 1.01:
-                x1 *= W; x2 *= W; y1 *= H; y2 *= H
-            x1c = max(0.0,float(x1)); y1c = max(0.0,float(y1)); x2c = min(W-1.0,float(x2)); y2c = min(H-1.0,float(y2))
-            if cls in PPE_CLASS_IDS:
-                out[cls].append((x1c,y1c,x2c,y2c,float(conf)))
-            else:
-                if cls == 0:
-                    people.append((x1c,y1c,x2c,y2c,float(conf)))
-        return out, people
-    for row in arr:
-        if row.size >= 6:
-            try:
+    def _to_box_coords(x1, y1, x2, y2):
+        if max(x1, x2, y1, y2) <= 1.01:
+            return x1 * W, y1 * H, x2 * W, y2 * H
+        return x1, y1, x2, y2
+    if arr.ndim == 2 and arr.shape[1] >= 6:
+        if arr.shape[1] == 6:
+            for row in arr:
                 x1,y1,x2,y2,conf,cls = row[:6]
                 cls = int(cls)
-                if max(x1,x2,y1,y2) <= 1.01:
-                    x1 *= W; x2 *= W; y1 *= H; y2 *= H
-                x1c = max(0.0,float(x1)); y1c = max(0.0,float(y1)); x2c = min(W-1.0,float(x2)); y2c = min(H-1.0,float(y2))
+                x1c,y1c,x2c,y2c = _to_box_coords(x1,y1,x2,y2)
+                x1c = max(0.0,float(x1c)); y1c = max(0.0,float(y1c)); x2c = min(W-1.0,float(x2c)); y2c = min(H-1.0,float(y2c))
                 if cls in PPE_CLASS_IDS:
                     out[cls].append((x1c,y1c,x2c,y2c,float(conf)))
+        else:
+            for row in arr:
+                x,y,w,h,conf = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4])
+                probs = row[5:]
+                if probs.size>0:
+                    cls = int(np.argmax(probs))
+                    cls_conf = float(probs[cls])
                 else:
-                    if cls == 0:
-                        people.append((x1c,y1c,x2c,y2c,float(conf)))
-            except Exception:
-                continue
+                    cls = int(row[-1]) if row.size>5 else -1
+                    cls_conf = 1.0
+                final_conf = float(conf*cls_conf)
+                if max(x,y,w,h) <= 1.01:
+                    cx = x * W; cy = y * H; ww = w * W; hh = h * H
+                else:
+                    cx = x; cy = y; ww = w; hh = h
+                x1 = cx - ww/2; y1 = cy - hh/2; x2 = cx + ww/2; y2 = cy + hh/2
+                x1c = max(0.0,x1); y1c = max(0.0,y1); x2c = min(W-1.0,x2); y2c = min(H-1.0,y2)
+                if cls in PPE_CLASS_IDS:
+                    out[cls].append((x1c,y1c,x2c,y2c,final_conf))
     return out, people
 
 def abs_lm(landmarks, idx, xoff, yoff, cw, ch):

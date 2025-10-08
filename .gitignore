@@ -4,6 +4,8 @@ training/data
 training/models
 # efficientdet
 training/efficientdet
+# yolov8
+training/yolov8
 # jupyter
 training/notebook
 # scripts

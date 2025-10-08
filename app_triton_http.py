@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from datetime import datetime
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
 import cv2
@@ -20,6 +21,25 @@ from app.tasks import process_image_task
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
+
+cors_env = os.environ.get("CORS_ALLOW_ORIGINS", "")
+if cors_env:
+    allowed_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
+else:
+    allowed_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
@@ -36,6 +56,7 @@ redis_pubsub = None
 ws_clients = set()
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
+FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 
 def sanitize_triton_url(url: str) -> str:
     if not url:
@@ -193,10 +214,11 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             ret, frame = cap.read()
             if not ret:
                 break
-            _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            img_bytes = jpg.tobytes()
-            meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-            process_image_task.delay(img_bytes, meta)
+            if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
+                _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                img_bytes = jpg.tobytes()
+                meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                process_image_task.delay(img_bytes, meta)
             frame_idx += 1
         if job:
             job.status = "completed"

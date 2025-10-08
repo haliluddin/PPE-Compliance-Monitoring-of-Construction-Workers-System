@@ -1,3 +1,4 @@
+# app/models.py
 from sqlalchemy import Column, Integer, Text, DateTime, JSON, LargeBinary, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -26,6 +27,8 @@ class Job(Base):
     status = Column(Text, default="queued")
     meta = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
 class Violation(Base):
     __tablename__ = "violations"
