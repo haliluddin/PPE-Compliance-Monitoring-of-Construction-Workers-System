@@ -15,7 +15,7 @@ import cv2
 import redis
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
-from app.db import SessionLocal
+from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task
 
@@ -39,6 +39,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+try:
+    from app.router.auth import router as auth_router
+    app.include_router(auth_router)
+except Exception:
+    pass
+
+try:
+    from app.router.workers import router as workers_router
+    app.include_router(workers_router)
+except Exception:
+    pass
 
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")

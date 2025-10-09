@@ -1,10 +1,11 @@
+# app/router/workers.py
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.database import get_db
 from app.models import Worker
 from app.schemas import WorkerCreate, WorkerResponse
-from app.auth import get_current_user
+from app.router.auth import get_current_user
 from typing import List
 
 

@@ -1,3 +1,4 @@
+# app/tasks.py
 from .celery_app import celery
 import base64
 import json
@@ -9,7 +10,7 @@ from urllib.parse import urlparse
 from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
 from .decision_logic import process_frame, init_pose
 import redis
-from app.db import SessionLocal
+from app.database import SessionLocal
 from app.models import Violation, Job, Worker
 from datetime import datetime
 

@@ -1,10 +1,11 @@
 import axios from "axios";
+import { API_BASE } from "./config"; //<-- add this
 
 const API = axios.create({
-  baseURL: "http://localhost:8000", // FastAPI backend
+  //baseURL: "http://localhost:8000",
+  baseURL: API_BASE,
 });
 
-// Automatically attach token if available
 API.interceptors.request.use((req) => {
   const token = localStorage.getItem("token");
   if (token) {

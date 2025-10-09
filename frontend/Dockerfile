@@ -1,3 +1,4 @@
+# frontend/Dockerfile
 ARG VITE_API_BASE=http://localhost:9000
 FROM node:18-alpine as build
 WORKDIR /app

@@ -1,5 +1,7 @@
+// frontend/src/pages/Login.jsx
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { API_BASE } from "../config";   // <-- add/remove this line as needed
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -15,7 +17,8 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/login", {
+      //const response = await fetch("http://127.0.0.1:8000/login", {
+      const response = await fetch(`${API_BASE}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -36,17 +39,14 @@ export default function Login() {
         return;
       }
 
-      // Save token
       localStorage.setItem("token", data.access_token);
 
-      // Save user info for Header component
       if (data.user) {
         localStorage.setItem("user", JSON.stringify(data.user));
       } else {
         localStorage.setItem("user", JSON.stringify({ name: "User", email }));
       }
 
-      // Redirect to camera page
       navigate("/camera");
 
     } catch (err) {
