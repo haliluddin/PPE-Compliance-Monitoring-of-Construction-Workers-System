@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 import time
 import logging
@@ -19,7 +18,6 @@ from tritonclient.http import InferenceServerClient, InferInput, InferRequestedO
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task
-from app.tasks import process_image_bytes_sync
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
@@ -42,7 +40,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 try:
     from app.router.auth import router as auth_router
     app.include_router(auth_router)
@@ -69,9 +66,11 @@ triton_models_meta = {}
 redis_sync = None
 redis_pubsub = None
 ws_clients = set()
+APP_LOOP = None
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
+USE_CELERY = os.environ.get("USE_CELERY", "true").lower() in ("1","true","yes")
 
 def sanitize_triton_url(url: str) -> str:
     if not url:
@@ -96,6 +95,7 @@ def load_model_metadata(client, model_name):
 @app.on_event("startup")
 def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
+    global APP_LOOP
     raw_url = TRITON_URL
     triton_url = sanitize_triton_url(raw_url)
     max_wait = int(os.environ.get("TRITON_WAIT_SECS", "120"))
@@ -137,6 +137,7 @@ def startup_event():
     except Exception:
         redis_sync = None
         redis_pubsub = None
+    APP_LOOP = asyncio.get_event_loop()
     asyncio.create_task(redis_subscriber_task())
 
 @app.on_event("shutdown")
@@ -245,10 +246,13 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 img_bytes = jpg.tobytes()
                 meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-                try:
-                    process_image_bytes_sync(img_bytes, meta)
-                except Exception:
-                    pass
+                if USE_CELERY:
+                    process_image_task.delay(img_bytes, meta)
+                else:
+                    try:
+                        process_image_task.run(None, img_bytes, meta)
+                    except Exception:
+                        process_image_task.delay(img_bytes, meta)
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -312,7 +316,13 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             img_bytes = jpg.tobytes()
             meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-            process_image_task.delay(img_bytes, meta)
+            if USE_CELERY:
+                process_image_task.delay(img_bytes, meta)
+            else:
+                try:
+                    process_image_task.run(None, img_bytes, meta)
+                except Exception:
+                    process_image_task.delay(img_bytes, meta)
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -376,9 +386,13 @@ async def infer(file: UploadFile = File(...), camera_id: int = None, job_id: int
     if data is None or len(data) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
     meta = {"camera_id": camera_id, "job_id": job_id, "ts": time.time()}
-    task = process_image_task.delay(data, meta)
-    TASKS_QUEUED.inc()
-    return {"task_id": task.id, "status": "queued"}
+    if USE_CELERY:
+        task = process_image_task.delay(data, meta)
+        TASKS_QUEUED.inc()
+        return {"task_id": task.id, "status": "queued"}
+    else:
+        process_image_task.run(None, data, meta)
+        return {"task_id": None, "status": "processed"}
 
 @app.post("/infer_sync")
 async def infer_sync(file: UploadFile = File(...)):

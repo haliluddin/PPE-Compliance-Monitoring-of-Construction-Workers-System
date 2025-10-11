@@ -96,7 +96,8 @@ def _parse_person_boxes_from_triton_outputs(outputs, H, W):
                     boxes.append((x1c, y1c, x2c, y2c, final_conf))
     return boxes
 
-def process_image_bytes_sync(image_bytes, meta=None):
+@celery.task(bind=True)
+def process_image_task(self, image_bytes, meta=None):
     sess = None
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -152,7 +153,10 @@ def process_image_bytes_sync(image_bytes, meta=None):
                 job.started_at = datetime.utcnow()
                 sess.commit()
         people = result.get("people", [])
-        r = redis.Redis.from_url(REDIS_URL)
+        try:
+            r = redis.Redis.from_url(REDIS_URL)
+        except Exception:
+            r = None
         publish_people = []
         for p in people:
             violations = p.get("violations", [])
@@ -208,12 +212,29 @@ def process_image_bytes_sync(image_bytes, meta=None):
             except Exception:
                 annotated_b64 = None
         payload = {"meta": meta, "people": publish_people, "boxes_by_class": result.get("boxes_by_class", {}), "annotated_jpeg_b64": annotated_b64, "timestamp": time.time()}
-        try:
-            r.publish(WS_CHANNEL, json.dumps(payload, default=str))
-        except Exception:
-            pass
+        if r:
+            try:
+                r.publish(WS_CHANNEL, json.dumps(payload, default=str))
+            except Exception:
+                r = None
+        if not r:
+            try:
+                import app_triton_http
+                import asyncio as _asyncio
+                loop = getattr(app_triton_http, "APP_LOOP", None)
+                if loop:
+                    futures = []
+                    for ws in list(app_triton_http.ws_clients):
+                        futures.append(_asyncio.run_coroutine_threadsafe(ws.send_json(payload), loop))
+                    for f in futures:
+                        try:
+                            f.result(timeout=1.0)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         return {"status": "ok", "meta": meta, "result_summary": {"people": len(people)}}
-    except Exception:
+    except Exception as e:
         raise
     finally:
         try:
@@ -221,7 +242,3 @@ def process_image_bytes_sync(image_bytes, meta=None):
                 sess.close()
         except Exception:
             pass
-
-@celery.task(bind=True)
-def process_image_task(self, image_bytes, meta=None):
-    return process_image_bytes_sync(image_bytes, meta)
