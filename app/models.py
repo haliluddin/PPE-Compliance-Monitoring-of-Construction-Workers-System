@@ -23,12 +23,6 @@ class Camera(Base):
     location = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-# class Worker(Base):
-#     __tablename__ = "workers"
-#     id = Column(Integer, primary_key=True)
-#     worker_code = Column(Text, unique=True)
-#     registered = Column(Boolean, default=False)
-#     created_at = Column(DateTime(timezone=True), server_default=func.now())
 class Worker(Base):
     __tablename__ = "workers"
     id = Column(Integer, primary_key=True, index=True)
