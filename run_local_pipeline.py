@@ -6,13 +6,51 @@ import numpy as np
 import cv2
 import onnxruntime as ort
 import easyocr
-import mediapipe as mp
-from app.decision_logic import process_frame, init_pose, parse_triton_outputs
+from app.decision_logic import process_frame, init_pose
+
+def get_model_input_size(sess, default=416):
+    try:
+        shape = sess.get_inputs()[0].shape
+        parsed = []
+        for s in shape:
+            if isinstance(s, int):
+                parsed.append(s)
+            else:
+                try:
+                    parsed.append(int(s))
+                except Exception:
+                    parsed.append(None)
+        if len(parsed) >= 4 and parsed[2] is not None and parsed[3] is not None:
+            return int(parsed[2])
+        ints = [x for x in parsed if isinstance(x, int)]
+        if len(ints) >= 2:
+            return int(ints[-2])
+    except Exception:
+        pass
+    return int(default)
+
+def make_session(onnx_path, providers=None, intra_threads=1, inter_threads=1):
+    if providers is None:
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = intra_threads
+    so.inter_op_num_threads = inter_threads
+    return ort.InferenceSession(onnx_path, sess_options=so, providers=providers)
+
+def prepare_image_for_onnx(img_bgr, size=(416,416)):
+    im = cv2.resize(img_bgr, size)
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB).astype('float32') / 255.0
+    im = np.transpose(im, (2,0,1))[None, ...]
+    return im.astype('float32')
 
 def parse_person_outputs_from_onnx(arr, H, W):
     boxes = []
     if arr is None:
         return boxes
+    if isinstance(arr, list):
+        if len(arr) > 0:
+            arr = np.array(arr[0])
+    arr = np.array(arr)
     if arr.ndim != 2:
         return boxes
     if arr.shape[1] == 6:
@@ -49,21 +87,6 @@ def parse_person_outputs_from_onnx(arr, H, W):
                 boxes.append((x1c, y1c, x2c, y2c, final_conf))
     return boxes
 
-def make_session(onnx_path, providers=None, intra_threads=1, inter_threads=1):
-    if providers is None:
-        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-    so = ort.SessionOptions()
-    so.intra_op_num_threads = intra_threads
-    so.inter_op_num_threads = inter_threads
-    sess = ort.InferenceSession(onnx_path, sess_options=so, providers=providers)
-    return sess
-
-def prepare_image_for_onnx(img_bgr, size=(416,416)):
-    im = cv2.resize(img_bgr, size)
-    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB).astype('float32') / 255.0
-    im = np.transpose(im, (2,0,1))[None, ...] 
-    return im.astype('float32')
-
 def run_infer(sess, inp_name, out_names, img_tensor):
     res = sess.run(out_names, {inp_name: img_tensor})
     return {n: np.array(v) for n, v in zip(out_names, res)}
@@ -79,28 +102,36 @@ def main():
     p.add_argument("--show", action="store_true")
     args = p.parse_args()
 
-    print("Loading models...")
-    person_sess = make_session(args.person_onnx)
+    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    try:
+        person_sess = make_session(args.person_onnx, providers=providers)
+    except Exception:
+        person_sess = make_session(args.person_onnx, providers=['CPUExecutionProvider'])
     p_input = person_sess.get_inputs()[0].name
     p_outs = [o.name for o in person_sess.get_outputs()]
-
-    ppe_sess = make_session(args.ppe_onnx)
+    person_input_size = get_model_input_size(person_sess, default=args.size)
+    try:
+        ppe_sess = make_session(args.ppe_onnx, providers=providers)
+    except Exception:
+        ppe_sess = make_session(args.ppe_onnx, providers=['CPUExecutionProvider'])
     pe_input = ppe_sess.get_inputs()[0].name
     pe_outs = [o.name for o in ppe_sess.get_outputs()]
+    ppe_input_size = get_model_input_size(ppe_sess, default=args.size)
 
     pose = init_pose()
-    ocr = easyocr.Reader(['en'], gpu=True)  
+    try:
+        ocr = easyocr.Reader(['en'], gpu=True)
+    except Exception:
+        ocr = easyocr.Reader(['en'], gpu=False)
 
     cap = cv2.VideoCapture(args.video)
     if not cap.isOpened():
         raise SystemExit("Cannot open video")
-
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     outv = cv2.VideoWriter(args.out, fourcc, max(1.0, fps/args.frame_skip), (W, H))
-
     frame_idx = 0
     t0 = time.time()
     processed = 0
@@ -110,37 +141,34 @@ def main():
             if not ret:
                 break
             if args.frame_skip <= 1 or (frame_idx % args.frame_skip) == 0:
-                inp_person = prepare_image_for_onnx(frame, size=(args.size, args.size))
-                p_res = person_sess.run(p_outs, {p_input: inp_person})
+                inp_person = prepare_image_for_onnx(frame, size=(person_input_size, person_input_size))
+                try:
+                    p_res = person_sess.run(p_outs, {p_input: inp_person})
+                except Exception:
+                    p_res = [np.array([])]
                 arr = None
                 for a in p_res:
                     a = np.array(a)
-                    if a.ndim == 2 and a.shape[1] >= 5 and a.shape[0] > 0:
+                    if a.ndim == 2 and a.shape[0] > 0 and a.shape[1] >= 5:
                         arr = a
                         break
                 person_boxes = parse_person_outputs_from_onnx(arr if arr is not None else np.array([]), H, W)
-
-                inp_ppe = prepare_image_for_onnx(frame, size=(args.size, args.size))
-                pe_res_list = ppe_sess.run(pe_outs, {pe_input: inp_ppe})
-                triton_like = {n: np.array(v) for n, v in zip(pe_outs, pe_res_list)}
-
-                result = process_frame(frame, triton_client=None, triton_model_name=None,
-                                       input_name=None, output_names=None,
-                                       triton_outputs=triton_like,
-                                       ocr_reader=ocr, regset=set(), pose_instance=pose,
-                                       person_boxes=person_boxes)
-
+                inp_ppe = prepare_image_for_onnx(frame, size=(ppe_input_size, ppe_input_size))
+                try:
+                    pe_res_list = ppe_sess.run(pe_outs, {pe_input: inp_ppe})
+                    triton_like = {n: np.array(v) for n, v in zip(pe_outs, pe_res_list)}
+                except Exception:
+                    triton_like = {}
+                result = process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=triton_like, ocr_reader=ocr, regset=set(), pose_instance=pose, person_boxes=person_boxes)
                 annotated = result.get("annotated_bgr")
                 if annotated is None:
                     annotated = frame
-
                 outv.write(annotated)
                 if args.show:
                     cv2.imshow("annot", annotated)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
                 processed += 1
-
             frame_idx += 1
     finally:
         cap.release()
