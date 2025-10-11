@@ -30,7 +30,9 @@ else:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "https://5lm18p50eufoh4-5173.proxy.runpod.net",
+        "https://5lm18p50eufoh4-9000.proxy.runpod.net"
     ]
 app.add_middleware(
     CORSMiddleware,
