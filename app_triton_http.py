@@ -19,6 +19,7 @@ from tritonclient.http import InferenceServerClient, InferInput, InferRequestedO
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task
+from app.tasks import process_image_bytes_sync
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
@@ -244,7 +245,10 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 img_bytes = jpg.tobytes()
                 meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-                process_image_task.delay(img_bytes, meta)
+                try:
+                    process_image_bytes_sync(img_bytes, meta)
+                except Exception:
+                    pass
             frame_idx += 1
         if job:
             job.status = "completed"

@@ -1,4 +1,3 @@
-# app/tasks.py
 from .celery_app import celery
 import base64
 import json
@@ -97,8 +96,7 @@ def _parse_person_boxes_from_triton_outputs(outputs, H, W):
                     boxes.append((x1c, y1c, x2c, y2c, final_conf))
     return boxes
 
-@celery.task(bind=True)
-def process_image_task(self, image_bytes, meta=None):
+def process_image_bytes_sync(image_bytes, meta=None):
     sess = None
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -215,7 +213,7 @@ def process_image_task(self, image_bytes, meta=None):
         except Exception:
             pass
         return {"status": "ok", "meta": meta, "result_summary": {"people": len(people)}}
-    except Exception as e:
+    except Exception:
         raise
     finally:
         try:
@@ -223,3 +221,7 @@ def process_image_task(self, image_bytes, meta=None):
                 sess.close()
         except Exception:
             pass
+
+@celery.task(bind=True)
+def process_image_task(self, image_bytes, meta=None):
+    return process_image_bytes_sync(image_bytes, meta)
