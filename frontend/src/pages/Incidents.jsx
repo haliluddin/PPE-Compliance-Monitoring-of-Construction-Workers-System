@@ -1,3 +1,4 @@
+// frontend/src/pages/Incidents.jsx
 import React, { useState } from "react";
 import { FaEye } from "react-icons/fa";
 import { FiSearch, FiCalendar } from "react-icons/fi";
