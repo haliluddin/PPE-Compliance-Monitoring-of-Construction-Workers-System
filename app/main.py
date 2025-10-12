@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.router.auth import router as auth_router
 # from app.router.cameras import router as cameras_router
 from app.router.workers import router as workers_router
-
+from app.router.violations import router as violations_router
 app = FastAPI()
 
 origins = [
@@ -22,3 +22,4 @@ app.add_middleware(
 app.include_router(auth_router)
 # app.include_router(cameras_router)
 app.include_router(workers_router)
+app.include_router(violations_router)
