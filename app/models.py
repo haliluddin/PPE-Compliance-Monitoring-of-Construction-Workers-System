@@ -2,7 +2,7 @@
 from sqlalchemy import Column, Integer, Text, DateTime, JSON, LargeBinary, Boolean, ForeignKey, Column, Integer, String, Date, Text, TIMESTAMP
 # from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from .database import Base
+from database import Base
 from sqlalchemy.sql import func
 
 # Base = declarative_base()
@@ -16,7 +16,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_supervisor = Column(Boolean, default=False)
     workers = relationship("Worker", back_populates="user")
-
+    violations = relationship("Violation", back_populates="user") 
 # class Camera(Base):
 #     __tablename__ = "cameras"
 #     id = Column(Integer, primary_key=True)
@@ -37,7 +37,7 @@ class Worker(Base):
 
     user_id = Column(Integer, ForeignKey("users.id"))
     user = relationship("User", back_populates="workers")
-    
+   
 # class Job(Base):
 #     __tablename__ = "jobs"
 #     id = Column(Integer, primary_key=True)
@@ -62,3 +62,7 @@ class Violation(Base):
     snapshot = Column(LargeBinary)
     inference = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    worker = relationship("Worker", back_populates="violations")
+    user = relationship("User", back_populates="violations")
