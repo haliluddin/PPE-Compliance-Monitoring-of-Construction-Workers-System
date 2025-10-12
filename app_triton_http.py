@@ -15,7 +15,7 @@ import cv2
 import redis
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
-from app.db import SessionLocal
+from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task
 
@@ -30,7 +30,9 @@ else:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "https://5lm18p50eufoh4-5173.proxy.runpod.net",
+        "https://5lm18p50eufoh4-9000.proxy.runpod.net"
     ]
 app.add_middleware(
     CORSMiddleware,
@@ -40,23 +42,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+try:
+    from app.router.auth import router as auth_router
+    app.include_router(auth_router)
+except Exception:
+    pass
+
+try:
+    from app.router.workers import router as workers_router
+    app.include_router(workers_router)
+except Exception:
+    pass
+
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
+HUMAN_MODEL = os.environ.get("HUMAN_MODEL_NAME", "person_yolo")
 TRITON_URL = os.environ.get("TRITON_URL", "triton:8000")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 WS_CHANNEL = os.environ.get("WS_CHANNEL", "ppe_results")
 tmp_upload_dir = os.environ.get("UPLOAD_DIR", "/tmp/uploads")
 os.makedirs(tmp_upload_dir, exist_ok=True)
 triton = None
-input_name = None
-output_names = None
+triton_models_meta = {}
 redis_sync = None
 redis_pubsub = None
 ws_clients = set()
+APP_LOOP = None
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
+USE_CELERY = os.environ.get("USE_CELERY", "true").lower() in ("1","true","yes")
 
 def sanitize_triton_url(url: str) -> str:
     if not url:
@@ -67,9 +83,21 @@ def sanitize_triton_url(url: str) -> str:
         return p.netloc or p.path
     return url
 
+def load_model_metadata(client, model_name):
+    try:
+        meta = client.get_model_metadata(model_name)
+        inp = meta.get('inputs', [])
+        outs = meta.get('outputs', [])
+        input_name = inp[0]['name'] if inp else None
+        output_names = [o['name'] for o in outs] if outs else []
+        return {'input_name': input_name, 'output_names': output_names}
+    except Exception:
+        return {'input_name': None, 'output_names': []}
+
 @app.on_event("startup")
 def startup_event():
-    global triton, input_name, output_names, redis_sync, redis_pubsub
+    global triton, triton_models_meta, redis_sync, redis_pubsub
+    global APP_LOOP
     raw_url = TRITON_URL
     triton_url = sanitize_triton_url(raw_url)
     max_wait = int(os.environ.get("TRITON_WAIT_SECS", "120"))
@@ -80,15 +108,16 @@ def startup_event():
             client = InferenceServerClient(url=triton_url)
         except Exception:
             triton = None
-            input_name = None
-            output_names = None
+            triton_models_meta = {}
             break
         try:
             if client.is_server_live() and client.is_server_ready():
                 triton = client
-                meta = triton.get_model_metadata(TRITON_MODEL)
-                input_name = meta['inputs'][0]['name'] if meta.get('inputs') else None
-                output_names = [o['name'] for o in meta.get('outputs', [])]
+                for model in [TRITON_MODEL, HUMAN_MODEL]:
+                    try:
+                        triton_models_meta[model] = load_model_metadata(triton, model)
+                    except Exception:
+                        triton_models_meta[model] = {'input_name': None, 'output_names': []}
                 break
             try:
                 if hasattr(client, "close"):
@@ -110,6 +139,7 @@ def startup_event():
     except Exception:
         redis_sync = None
         redis_pubsub = None
+    APP_LOOP = asyncio.get_event_loop()
     asyncio.create_task(redis_subscriber_task())
 
 @app.on_event("shutdown")
@@ -218,7 +248,13 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 img_bytes = jpg.tobytes()
                 meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-                process_image_task.delay(img_bytes, meta)
+                if USE_CELERY:
+                    process_image_task.delay(img_bytes, meta)
+                else:
+                    try:
+                        process_image_task.run(None, img_bytes, meta)
+                    except Exception:
+                        process_image_task.delay(img_bytes, meta)
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -282,7 +318,13 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             img_bytes = jpg.tobytes()
             meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-            process_image_task.delay(img_bytes, meta)
+            if USE_CELERY:
+                process_image_task.delay(img_bytes, meta)
+            else:
+                try:
+                    process_image_task.run(None, img_bytes, meta)
+                except Exception:
+                    process_image_task.delay(img_bytes, meta)
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -346,14 +388,18 @@ async def infer(file: UploadFile = File(...), camera_id: int = None, job_id: int
     if data is None or len(data) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
     meta = {"camera_id": camera_id, "job_id": job_id, "ts": time.time()}
-    task = process_image_task.delay(data, meta)
-    TASKS_QUEUED.inc()
-    return {"task_id": task.id, "status": "queued"}
+    if USE_CELERY:
+        task = process_image_task.delay(data, meta)
+        TASKS_QUEUED.inc()
+        return {"task_id": task.id, "status": "queued"}
+    else:
+        process_image_task.run(None, data, meta)
+        return {"task_id": None, "status": "processed"}
 
 @app.post("/infer_sync")
 async def infer_sync(file: UploadFile = File(...)):
     INFER_REQUESTS.inc()
-    global triton, input_name, output_names, TRITON_MODEL
+    global triton, TRITON_MODEL
     if triton is None:
         raise HTTPException(status_code=503, detail="Triton server not ready")
     data = await file.read()
@@ -364,6 +410,11 @@ async def infer_sync(file: UploadFile = File(...)):
     img = cv2.resize(img, (416, 416))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype("float32")
     img = np.transpose(img, (2, 0, 1))[None, ...]
+    meta = triton_models_meta.get(TRITON_MODEL, {})
+    input_name = meta.get('input_name')
+    output_names = meta.get('output_names', [])
+    if not input_name or not output_names:
+        raise HTTPException(status_code=503, detail="Model metadata not available")
     inp = InferInput(input_name, img.shape, "FP32")
     inp.set_data_from_numpy(img)
     outputs = [InferRequestedOutput(n) for n in output_names]

@@ -3,6 +3,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
+
 DATABASE_URL = os.environ.get("POSTGRES_URL", "postgresql://postgres:ppe@localhost:5432/ppe_compliance")
 # DATABASE_URL = os.environ.get("POSTGRES_URL", "postgresql://myuser:password@postgres:5432/ppe_compliance")
 

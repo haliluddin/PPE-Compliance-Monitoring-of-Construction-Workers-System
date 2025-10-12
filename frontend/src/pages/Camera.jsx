@@ -1,10 +1,11 @@
+// frontend/src/pages/Camera.jsx
 import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiSettings, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
 import ImageCard from "../components/ImageCard";
 import { useState, useEffect, useRef } from "react";
 
 const API_BASE = (typeof window !== "undefined" && window.__ENV && window.__ENV.API_BASE)
   || (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE)
-  || "http://127.0.0.1:9000";
+  || "https://5lm18p50eufoh4-9000.proxy.runpod.net";
 
 const WS_BASE = (typeof window !== "undefined" && window.__ENV && window.__ENV.VITE_WS_URL)
   || (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_WS_URL)
