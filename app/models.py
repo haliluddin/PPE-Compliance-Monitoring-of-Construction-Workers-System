@@ -48,16 +48,16 @@ class Worker(Base):
 #     started_at = Column(DateTime(timezone=True), nullable=True)
 #     finished_at = Column(DateTime(timezone=True), nullable=True)
 
-class Violation(Base):
-    __tablename__ = "violations"
-    id = Column(Integer, primary_key=True)
-    job_id = Column(Integer, ForeignKey("jobs.id"))
-    camera_id = Column(Integer, ForeignKey("cameras.id"))
-    worker_id = Column(Integer, ForeignKey("workers.id"))
-    worker_code = Column(Text)
-    violation_types = Column(Text)
-    frame_index = Column(Integer)
-    frame_ts = Column(DateTime(timezone=True))
-    snapshot = Column(LargeBinary)
-    inference = Column(JSON)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+# class Violation(Base):
+#     __tablename__ = "violations"
+#     id = Column(Integer, primary_key=True)
+#     job_id = Column(Integer, ForeignKey("jobs.id"))
+#     camera_id = Column(Integer, ForeignKey("cameras.id"))
+#     worker_id = Column(Integer, ForeignKey("workers.id"))
+#     worker_code = Column(Text)
+#     violation_types = Column(Text)
+#     frame_index = Column(Integer)
+#     frame_ts = Column(DateTime(timezone=True))
+#     snapshot = Column(LargeBinary)
+#     inference = Column(JSON)
+#     created_at = Column(DateTime(timezone=True), server_default=func.now())

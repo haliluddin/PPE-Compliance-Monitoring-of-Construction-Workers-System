@@ -1,5 +1,7 @@
+// frontend/src/pages/Register.jsx
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { API_BASE } from "../config";   // <-- add/remove this line as needed
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -55,6 +57,7 @@ export default function Register() {
 
   try {
     const response = await fetch("http://127.0.0.1:8000/register", {
+    //const response = await fetch(`${API_BASE}/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
