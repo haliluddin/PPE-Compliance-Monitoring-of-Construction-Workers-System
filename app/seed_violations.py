@@ -3,19 +3,14 @@ from database import SessionLocal
 from models import Worker, Violation, User
 from datetime import datetime
 
-# Initialize DB session
 db = SessionLocal()
 
-# 🔹 Choose which User account to associate the violations with
-# You can change this ID depending on your database
 user_id = 1
 
-# 🔹 Choose which Worker the violations belong to
-worker_id = 4
+worker_id = 6
 
-# Optionally, verify the user and worker exist
-user = db.query(User).filter(User.id == user_id).first()
-worker = db.query(Worker).filter(Worker.id == worker_id).first()
+user = db.query(User).filter_by(id=user_id).first()
+worker = db.query(Worker).filter_by(id=worker_id, user_id=user_id).first()
 
 if not user:
     print(f"❌ User with ID {user_id} not found.")
@@ -27,7 +22,6 @@ if not worker:
     db.close()
     exit()
 
-# ✅ Define new violation records
 new_violations = [
     Violation(
         worker_id=worker_id,
@@ -67,5 +61,18 @@ new_violations = [
 # Add and commit
 db.add_all(new_violations)
 db.commit()
-print(f"✅ {len(new_violations)} violations added successfully for User ID {user_id} and Worker ID {worker_id}.")
+print(f" {len(new_violations)} violations added successfully for User ID {user_id} and Worker ID {worker_id}.")
 db.close()
+
+
+# check_workers.py
+# from database import SessionLocal
+# from models import Worker
+
+# db = SessionLocal()
+
+# workers = db.query(Worker).all()
+# for w in workers:
+#     print(f"ID: {w.id}, Name: {w.fullName}, User ID: {w.user_id}")
+
+# db.close()
