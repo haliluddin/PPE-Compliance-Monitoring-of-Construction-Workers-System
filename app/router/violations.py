@@ -27,6 +27,7 @@ def get_violations(
             "worker": v.fullName,
             "worker_code": v.Violation.worker_code,
             "frame_ts": v.Violation.frame_ts,
+            "status": v.Violation.status,
         }
         for v in violations
     ]
@@ -44,6 +45,7 @@ def create_violation(
         frame_ts=violation.frame_ts,
         worker_code=violation.worker_code,
         user_id=current_user.id,  
+        status="pending",
     )
     db.add(new_violation)
     db.commit()

@@ -51,6 +51,7 @@ class ViolationResponse(BaseModel):
     worker_id: int
     worker_code: str
     frame_ts: str
+    statud:str
     user_id: int
 
     class Config:

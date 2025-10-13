@@ -17,6 +17,7 @@ class User(Base):
     is_supervisor = Column(Boolean, default=False)
     workers = relationship("Worker", back_populates="user")
     violations = relationship("Violation", back_populates="user") 
+    
 # class Camera(Base):
 #     __tablename__ = "cameras"
 #     id = Column(Integer, primary_key=True)
@@ -38,6 +39,7 @@ class Worker(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     user = relationship("User", back_populates="workers")
     violations = relationship("Violation", back_populates="worker")
+
 # class Job(Base):
 #     __tablename__ = "jobs"
 #     id = Column(Integer, primary_key=True)
