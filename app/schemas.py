@@ -33,7 +33,24 @@ class WorkerResponse(BaseModel):
     role: str
     dateAdded: date
     status: str
-    registered: bool  # include in response
+    registered: bool 
+    user_id: int
+
+    class Config:
+        orm_mode = True
+
+class ViolationCreate(BaseModel):
+    violation_types: str
+    worker_id: int
+    worker_code: str
+    frame_ts: str 
+
+class ViolationResponse(BaseModel):
+    id: int
+    violation_types: str
+    worker_id: int
+    worker_code: str
+    frame_ts: str
     user_id: int
 
     class Config:
