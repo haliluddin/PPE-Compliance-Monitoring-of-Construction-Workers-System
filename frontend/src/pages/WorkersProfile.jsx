@@ -267,6 +267,8 @@ export default function WorkersProfile() {
           <h2 className="text-xl font-semibold text-gray-200">Violation History</h2>
 
           <div className="flex flex-col md:flex-row md:items-center space-y-2 md:space-y-0 md:space-x-4">
+           
+           
             {/* Search Bar */}
             <div className="relative w-full md:w-64">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
@@ -346,6 +348,14 @@ export default function WorkersProfile() {
                   </div>
                 </div>
               )}
+            </div>
+            <div className="flex space-x-2">
+              <button 
+                className="px-3 py-3 text-xs font-medium text-white bg-blue rounded-md hover:bg-[#5388DF] transition-colors"
+                onClick={() => alert('Export to PDF')}
+              >
+                Export to PDF
+              </button>
             </div>
           </div>
         </div>
