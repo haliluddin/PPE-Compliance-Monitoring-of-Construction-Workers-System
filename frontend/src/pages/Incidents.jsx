@@ -17,14 +17,20 @@ export default function Incident() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(5);
 
- 
   useEffect(() => {
-  fetch("http://localhost:8000/violations/") // <-- add the trailing slash
-    .then(res => res.json())
-    .then(data => setNotifications(data))
-    .catch(err => console.error("Error fetching violations:", err));
-}, []);
-
+    const token = localStorage.getItem("token");
+    fetch("http://localhost:8000/violations/", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Unauthorized");
+        return res.json();
+      })
+      .then((data) => setNotifications(data))
+      .catch((err) => console.error("Error fetching violations:", err));
+  }, []);
 
   const handleChange = (key, value) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -38,7 +44,6 @@ export default function Incident() {
     "No Safety Shoes",
   ];
 
- 
   const filteredNotifications = notifications
     .filter((n) => {
       if (
@@ -67,17 +72,29 @@ export default function Incident() {
     .sort((a, b) => {
       const dateA = new Date(a.date);
       const dateB = new Date(b.date);
-      return filters.sortBy === "newest"
-        ? dateB - dateA
-        : dateA - dateB;
+      return filters.sortBy === "newest" ? dateB - dateA : dateA - dateB;
     });
 
-  
   const totalPages = Math.ceil(filteredNotifications.length / itemsPerPage);
   const currentItems = filteredNotifications.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
+
+  // Function to determine status badge color
+  const getStatusColor = (status) => {
+    switch (status?.toLowerCase()) {
+      case "resolved":
+        return "bg-green-600 text-white";
+      case "reviewing":
+        return "bg-yellow-500 text-black";
+      case "rejected":
+        return "bg-red-600 text-white";
+      case "pending":
+      default:
+        return "bg-gray-500 text-white";
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
@@ -186,35 +203,49 @@ export default function Incident() {
           All recorded incidents are listed below.
         </p>
 
-        <div className="grid grid-cols-6 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
+        <div className="grid grid-cols-7 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
           <div className="bg-[#19325C] px-4 py-2 rounded-lg">Worker No.</div>
           <div className="bg-[#19325C] px-4 py-2 rounded-lg">Worker Name</div>
           <div className="bg-[#19325C] px-4 py-2 rounded-lg">Camera Location</div>
           <div className="bg-[#19325C] px-4 py-2 rounded-lg">Violation</div>
+            <div className="bg-[#19325C] px-4 py-2 rounded-lg">Status</div>
           <div className="bg-[#19325C] px-4 py-2 rounded-lg">Date & Time</div>
           <div className="bg-[#19325C] px-4 py-2 rounded-lg text-center">
             Action
           </div>
         </div>
 
-        
- <div className="space-y-3">
-         {currentItems.map((n) => (
-          <div key={n.id} className="grid grid-cols-6 gap-4 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center">
-            <div className="font-medium text-gray-200">{n.worker_code}</div>
-            <div className="text-gray-200">{n.worker}</div>
-            <div className="text-gray-300">—</div> {/* camera placeholder */}
-            <div className="text-gray-300">{n.violation}</div>
-            <div className="text-gray-300">{n.frame_ts}</div>
-            <div className="text-center">
-              <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
-                <FaEye className="mr-2" /> View
-              </button>
+        {/* Status badge added */}
+        <div className="space-y-3">
+          {currentItems.map((n) => (
+            <div
+              key={n.id}
+              className="grid grid-cols-7 gap-4 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
+            >
+              <div className="font-medium text-gray-200">{n.worker_code}</div>
+              <div className="text-gray-200">{n.worker}</div>
+              <div className="text-gray-300">—</div>
+              <div className="text-gray-300">{n.violation}</div>
+              <div>
+                <span
+                  className={`px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(
+                    n.status
+                  )}`}
+                >
+                  {n.status ? n.status.toUpperCase() : "No Status"}
+                </span>
+              </div>
+              <div className="text-gray-300">{n.frame_ts}</div>
+              <div className="text-center">
+                <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
+                  <FaEye className="mr-2" /> View
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
- </div>
-<div className="flex justify-center mt-6 space-x-2">
+          ))}
+        </div>
+
+        <div className="flex justify-center mt-6 space-x-2">
           <button
             onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
             disabled={currentPage === 1}
@@ -226,13 +257,19 @@ export default function Incident() {
             <button
               key={i + 1}
               onClick={() => setCurrentPage(i + 1)}
-              className={`px-4 py-2 rounded-lg ${currentPage === i + 1 ? 'bg-[#5388DF] text-white' : 'bg-[#2A2B30] text-gray-200 hover:bg-[#19325C]'} transition`}
+              className={`px-4 py-2 rounded-lg ${
+                currentPage === i + 1
+                  ? "bg-[#5388DF] text-white"
+                  : "bg-[#2A2B30] text-gray-200 hover:bg-[#19325C]"
+              } transition`}
             >
               {i + 1}
             </button>
           ))}
           <button
-            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            onClick={() =>
+              setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+            }
             disabled={currentPage === totalPages}
             className="px-4 py-2 bg-[#2A2B30] text-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#19325C] transition"
           >
