@@ -35,6 +35,7 @@ class WorkerResponse(BaseModel):
     status: str
     registered: bool 
     user_id: int
+    totalIncidents: int = 0 
 
     class Config:
         orm_mode = True

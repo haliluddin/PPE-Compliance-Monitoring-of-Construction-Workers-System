@@ -17,6 +17,7 @@ class User(Base):
     is_supervisor = Column(Boolean, default=False)
     workers = relationship("Worker", back_populates="user")
     violations = relationship("Violation", back_populates="user") 
+   # notifications = relationship("Notification", back_populates="user")
 
 # class Camera(Base):
 #     __tablename__ = "cameras"
@@ -68,3 +69,17 @@ class Violation(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     worker = relationship("Worker", back_populates="violations")
     user = relationship("User", back_populates="violations")
+
+# class Notification(Base):
+#     __tablename__ = "notifications"
+
+#     id = Column(Integer, primary_key=True, index=True)
+#     title = Column(String, nullable=False)
+#     message = Column(Text, nullable=False)
+#     date_created = Column(DateTime(timezone=True), server_default=func.now())
+#     is_read = Column(Boolean, default=False)
+#     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+#     violation_id = Column(Integer, ForeignKey("violations.id"), nullable=True)
+
+#     user = relationship("User", back_populates="notifications")
+#     violation = relationship("Violation")
