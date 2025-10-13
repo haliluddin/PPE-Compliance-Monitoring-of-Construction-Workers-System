@@ -1,4 +1,4 @@
-
+# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.router.auth import router as auth_router
@@ -11,6 +11,7 @@ app = FastAPI()
 
 origins = [
     "http://localhost:5173", 
+    
 ]
 
 app.add_middleware(

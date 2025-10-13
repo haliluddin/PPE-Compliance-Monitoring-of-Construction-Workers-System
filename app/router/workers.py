@@ -6,6 +6,7 @@ from app.models import Worker, Violation
 from app.schemas import WorkerResponse
 from app.router.auth import get_current_user
 from typing import List
+from fastapi import HTTPException
 
 router = APIRouter()
 
@@ -53,3 +54,51 @@ def get_workers(
         }
         for w in workers
     ]
+
+
+
+# -----------------------------
+# GET single worker with violations
+# -----------------------------
+@router.get("/workers/{worker_id}")
+def get_worker_profile(
+    worker_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Get worker for current user
+    worker = db.query(Worker).filter(
+        Worker.id == worker_id,
+        Worker.user_id == current_user.id
+    ).first()
+    
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    # Get all violations for this worker
+    violations = db.query(Violation).filter(Violation.worker_id == worker.id).all()
+
+    # Map violations to dict for frontend
+    violation_history = [
+        {
+            "id": v.id,
+            "date": v.frame_ts,  # or v.date if you store datetime
+            "type": v.violation_types,
+            "cameraLocation": getattr(v, "cameraLocation", "N/A")  # optional field
+        }
+        for v in violations
+    ]
+
+    return {
+        "id": worker.id,
+        "fullName": worker.fullName,
+        "worker_code": worker.worker_code,
+        "assignedLocation": worker.assignedLocation,
+        "role": worker.role,
+        "dateAdded": worker.dateAdded,
+        "status": worker.status,
+        "registered": worker.registered,
+        "user_id": worker.user_id,
+        "totalIncidents": len(violation_history),
+        "violationHistory": violation_history
+    }
