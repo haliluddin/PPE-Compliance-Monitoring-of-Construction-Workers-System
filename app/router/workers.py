@@ -99,9 +99,9 @@ def get_worker_profile(
     violation_history = [
         {
             "id": v.id,
-            "date": v.frame_ts,  # or v.date if you store datetime
+            "date": v.frame_ts, 
             "type": v.violation_types,
-            "cameraLocation": getattr(v, "cameraLocation", "N/A")  # optional field
+            "cameraLocation": getattr(v, "cameraLocation", "N/A")  
         }
         for v in violations
     ]
