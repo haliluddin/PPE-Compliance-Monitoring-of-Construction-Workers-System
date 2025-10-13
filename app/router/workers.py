@@ -1,14 +1,16 @@
+# app/router/workers.py
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
 from app.models import Worker, Violation
-from app.schemas import WorkerResponse
+from app.schemas import WorkerResponse, WorkerCreate
 from app.router.auth import get_current_user
 from typing import List
 from fastapi import HTTPException
 
 router = APIRouter()
+
 
 # -----------------------------
 # GET workers for current user (with total incidents)
@@ -55,6 +57,21 @@ def get_workers(
         for w in workers
     ]
 
+
+# -----------------------------
+# POST add worker
+# -----------------------------
+@router.post("/workers", response_model=WorkerResponse)
+def add_worker(
+    worker: WorkerCreate,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    new_worker = Worker(**worker.dict(), user_id=current_user.id)
+    db.add(new_worker)
+    db.commit()
+    db.refresh(new_worker)
+    return new_worker
 
 
 # -----------------------------
