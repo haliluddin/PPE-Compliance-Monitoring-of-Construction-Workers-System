@@ -1,6 +1,5 @@
-// frontend/src/pages/WorkersProfile.jsx
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ShieldCheck, Calendar } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Calendar, Search, Filter, ChevronDown } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { FaEye } from "react-icons/fa";
 import { useParams, useNavigate } from 'react-router-dom';
@@ -24,16 +23,12 @@ export default function WorkersProfile() {
         const res = await API.get(`/workers/${id}`);
         const data = res.data;
 
-        // Compute compliance rate (example logic: compliance = % of 'No violation' records)
         const total = data.violationHistory?.length || 0;
         const compliant = data.violationHistory?.filter(v => v.type === 'No Violation').length || 0;
         data.complianceRate = total > 0 ? Math.round((compliant / total) * 100) : 100;
 
-        // Sort violations descending by date for last violation
         const sortedViolations = data.violationHistory?.sort((a, b) => new Date(b.date) - new Date(a.date));
         data.lastViolationDate = sortedViolations?.[0]?.date || null;
-
-        // Set total violations
         data.totalViolations = total;
 
         setWorkerData(data);
@@ -46,7 +41,7 @@ export default function WorkersProfile() {
     fetchWorker();
   }, [id]);
 
-  // Filter violations safely
+  // Filter violations
   const filterViolations = () => {
     if (!workerData?.violationHistory) return [];
     return workerData.violationHistory.filter(violation => {
@@ -66,7 +61,7 @@ export default function WorkersProfile() {
     });
   };
 
-  // Close filter when clicking outside
+  // Close filter dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       const filterButton = event.target.closest('.filter-button');
@@ -96,7 +91,6 @@ export default function WorkersProfile() {
         Back to Workers
       </button>
 
-      {/* Worker Profile Header */}
       <div className="bg-[#2A2B30] p-6 mb-8 shadow-lg rounded-xl border border-gray-700">
         <div className="flex flex-col">
           <div className="flex items-center justify-between">
@@ -132,7 +126,7 @@ export default function WorkersProfile() {
                 </div>
                 <div className="flex items-center mt-1.5 space-x-2">
                   <span className="text-sm text-gray-400">Worker No:</span>
-                  <span className="text-sm text-blue-300 font-medium">{workerData.id}</span>
+                  <span className="text-sm text-blue-300 font-medium">{workerData.worker_code}</span>
                 </div>
               </div>
             </div>
@@ -269,7 +263,96 @@ export default function WorkersProfile() {
 
       {/* Violation History Section */}
       <div className="bg-[#2A2B30] p-6 shadow-lg rounded-xl mb-8">
-        <table className="min-w-full">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
+          <h2 className="text-xl font-semibold text-gray-200">Violation History</h2>
+
+          <div className="flex flex-col md:flex-row md:items-center space-y-2 md:space-y-0 md:space-x-4">
+            {/* Search Bar */}
+            <div className="relative w-full md:w-64">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search violations..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2 bg-[#1E1F23] border border-gray-600 rounded-md text-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent w-full"
+              />
+            </div>
+
+            {/* Filter Button */}
+            <div className="relative">
+              <button 
+                className="filter-button flex items-center space-x-2 px-4 py-2 bg-[#1E1F23] rounded-md text-gray-300 hover:bg-[#2A2B30]"
+                onClick={() => setShowFilter(!showFilter)}
+              >
+                <Filter size={16} />
+                <span>Filter</span>
+                <ChevronDown size={16} />
+              </button>
+
+              {/* Filter Dropdown */}
+              {showFilter && (
+                <div 
+                  className="filter-dropdown absolute right-0 mt-2 w-80 bg-[#2A2B30] rounded-md shadow-lg p-4 z-10 border border-gray-700"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="space-y-4">
+                    {/* Date Range */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Date Range</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="date"
+                          value={dateRange.start}
+                          onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
+                          className="bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
+                        />
+                        <input
+                          type="date"
+                          value={dateRange.end}
+                          onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
+                          className="bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Violation Type */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Violation Type</label>
+                      <select
+                        value={selectedType}
+                        onChange={(e) => setSelectedType(e.target.value)}
+                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
+                      >
+                        <option value="All">All Types</option>
+                        <option value="No Helmet">No Helmet</option>
+                        <option value="No Vest">No Vest</option>
+                        <option value="No Gloves">No Gloves</option>
+                        <option value="No Safety Shoes">No Safety Shoes</option>
+                      </select>
+                    </div>
+
+                    {/* Clear Filters */}
+                    <button
+                      onClick={() => {
+                        setDateRange({ start: '', end: '' });
+                        setSelectedType('All');
+                        setShowFilter(false);
+                      }}
+                      className="w-full mt-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-indigo-700"
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="min-w-full">
             <thead>
               <tr className="grid grid-cols-4 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Date & Time</th>
@@ -285,9 +368,7 @@ export default function WorkersProfile() {
                     key={index} 
                     className="grid grid-cols-4 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
                   >
-                    <td className="text-gray-300">
-                      {format(parseISO(violation.date), 'MMM d, yyyy hh:mm a')}
-                    </td>
+                    <td className="text-gray-300">{format(parseISO(violation.date), 'MMM d, yyyy hh:mm a')}</td>
                     <td className="text-gray-300">{violation.type}</td>
                     <td className="text-gray-300">{violation.cameraLocation}</td>
                     <td className="text-gray-300">
@@ -307,6 +388,7 @@ export default function WorkersProfile() {
               )}
             </tbody>
           </table>
+        </div>
       </div>
     </div>
   );
