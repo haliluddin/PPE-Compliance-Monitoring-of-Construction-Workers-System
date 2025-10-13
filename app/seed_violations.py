@@ -7,7 +7,7 @@ db = SessionLocal()
 
 user_id = 1
 
-worker_id = 1
+worker_id = 6
 
 user = db.query(User).filter_by(id=user_id).first()
 worker = db.query(Worker).filter_by(id=worker_id, user_id=user_id).first()
