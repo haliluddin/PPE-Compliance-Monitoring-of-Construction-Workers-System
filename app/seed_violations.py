@@ -5,9 +5,9 @@ from datetime import datetime
 
 db = SessionLocal()
 
-user_id = 1
+user_id = 2
 
-worker_id = 6
+worker_id = 4
 
 user = db.query(User).filter_by(id=user_id).first()
 worker = db.query(Worker).filter_by(id=worker_id, user_id=user_id).first()
@@ -32,7 +32,7 @@ new_violations = [
         frame_ts=datetime(2025, 10, 8, 10, 30),
         snapshot=None,
         inference={"detected": False},
-        status="pending",
+        status="Resolved",
     ),
     Violation(
         worker_id=worker_id,
