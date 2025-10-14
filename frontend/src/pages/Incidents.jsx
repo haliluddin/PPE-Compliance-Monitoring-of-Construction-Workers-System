@@ -253,7 +253,15 @@ useEffect(() => {
                   {n.status ? n.status.toUpperCase() : "No Status"}
                 </span>
               </div>
-              <div className="text-gray-300">{n.frame_ts}</div>
+              <div className="text-gray-300">
+                 {n.frame_ts ? new Date(n.frame_ts).toLocaleString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+              }) : "-"}
+              </div>
               <div className="text-center">
                 <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
                   <FaEye className="mr-2" /> View
