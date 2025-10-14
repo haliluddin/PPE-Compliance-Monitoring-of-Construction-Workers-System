@@ -1,15 +1,29 @@
-// frontend/src/pages/Camera.jsx
 import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiSettings, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
 import ImageCard from "../components/ImageCard";
 import { useState, useEffect, useRef } from "react";
 
 const API_BASE = (typeof window !== "undefined" && window.__ENV && window.__ENV.API_BASE)
   || (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE)
-  || "https://5lm18p50eufoh4-9000.proxy.runpod.net";
+  || "http://127.0.0.1:9000";
 
-const WS_BASE = (typeof window !== "undefined" && window.__ENV && window.__ENV.VITE_WS_URL)
-  || (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_WS_URL)
-  || API_BASE.replace(/^http/, "ws");
+const raw_ws_env = (typeof window !== "undefined" && window.__ENV && (window.__ENV.VITE_WS_URL || window.__ENV.WS_URL))
+  || (typeof import.meta !== "undefined" && import.meta.env && (import.meta.env.VITE_WS_URL || import.meta.env.WS_URL))
+  || null;
+
+function normalizeWsBase(raw, apiBaseFallback) {
+  if (raw) {
+    if (raw.startsWith("ws://") || raw.startsWith("wss://")) return raw.replace(/\/+$/, "");
+    if (raw.startsWith("http://")) return raw.replace(/^http:\/\//, "ws://").replace(/\/+$/, "");
+    if (raw.startsWith("https://")) return raw.replace(/^https:\/\//, "wss://").replace(/\/+$/, "");
+    return raw.replace(/\/+$/, "");
+  }
+  if (!apiBaseFallback) return "";
+  if (apiBaseFallback.startsWith("https://")) return apiBaseFallback.replace(/^https:\/\//, "wss://").replace(/\/+$/, "");
+  if (apiBaseFallback.startsWith("http://")) return apiBaseFallback.replace(/^http:\/\//, "ws://").replace(/\/+$/, "");
+  return apiBaseFallback.replace(/\/+$/, "");
+}
+
+const WS_BASE = normalizeWsBase(raw_ws_env, API_BASE);
 
 export default function Camera() {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -19,6 +33,14 @@ export default function Camera() {
   const [selectedCamera, setSelectedCamera] = useState(null);
   const wsRef = useRef(null);
   const fileInputRef = useRef(null);
+  const wsPath = (WS_BASE || "").replace(/\/+$/, "") + "/ws";
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newCamName, setNewCamName] = useState("");
+  const [newCamLocation, setNewCamLocation] = useState("");
+  const [newCamRtsp, setNewCamRtsp] = useState("");
+  const [addingCamera, setAddingCamera] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -32,7 +54,6 @@ export default function Camera() {
         const data = await res.json();
         setBackendMsg(data.triton_ready ? "Backend ready ✅" : "Backend not ready ⚠️");
       } catch (err) {
-        console.error("Backend connection failed:", err);
         setBackendMsg("Cannot connect to backend ❌");
       }
     };
@@ -40,12 +61,39 @@ export default function Camera() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    async function loadCameras() {
+      try {
+        const res = await fetch(`${API_BASE}/cameras`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!mounted) return;
+        const list = data.cameras || data || [];
+        const normalized = list.map((c, i) => ({
+          job_id: c.job_id ?? null,
+          camera_id: c.id ?? c.camera_id ?? c.cameraId ?? null,
+          title: c.name || `Camera ${c.id ?? i + 1}`,
+          location: c.location || "",
+          status: "IDLE",
+          videoUrl: null,
+          frameSrc: null,
+          latest_people: [],
+          meta: {}
+        }));
+        setCameras(normalized);
+      } catch (e) {}
+    }
+    loadCameras();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
     if (wsRef.current) return;
+    if (!WS_BASE) return;
     try {
-      const ws = new WebSocket(`${WS_BASE}/ws`);
+      const ws = new WebSocket(wsPath);
       wsRef.current = ws;
-      ws.onopen = () => {
-      };
+      ws.onopen = () => {};
       ws.onmessage = (ev) => {
         try {
           const payload = JSON.parse(ev.data);
@@ -53,40 +101,52 @@ export default function Camera() {
           const jobId = meta.job_id ?? (meta.jobId ?? null);
           const annotated = payload.annotated_jpeg_b64 ?? payload.annotated_jpeg ?? null;
           if (!jobId) return;
-          setCameras((prev) =>
-            prev.map((cam) => {
+          setCameras((prev) => {
+            let found = false;
+            const mapped = prev.map((cam) => {
               if (String(cam.job_id) !== String(jobId)) return cam;
-              const next = { ...cam };
-              if (annotated && (next.is_stream || next.status === "LIVE" || next.meta?.is_stream)) {
-                next.frameSrc = `data:image/jpeg;base64,${annotated}`;
-                next.status = "LIVE";
-              } else {
-                if (annotated) {
-                  next.latestAnnotatedThumb = `data:image/jpeg;base64,${annotated}`;
-                }
+              found = true;
+              const nextCam = { ...cam };
+              if (annotated) {
+                nextCam.frameSrc = `data:image/jpeg;base64,${annotated}`;
+                nextCam.latestAnnotatedThumb = `data:image/jpeg;base64,${annotated}`;
+                nextCam.status = "LIVE";
               }
               if (payload.people) {
-                next.latest_people = payload.people;
+                nextCam.latest_people = payload.people;
               }
-              return next;
-            })
-          );
-        } catch (e) {
-        }
+              nextCam.meta = { ...(nextCam.meta || {}), ...(meta || {}) };
+              return nextCam;
+            });
+            if (!found) {
+              const newCam = {
+                job_id: jobId,
+                title: `Camera ${jobId}`,
+                status: annotated ? "LIVE" : "PROCESSING",
+                videoUrl: null,
+                frameSrc: annotated ? `data:image/jpeg;base64,${annotated}` : null,
+                latestAnnotatedThumb: annotated ? `data:image/jpeg;base64,${annotated}` : null,
+                latest_people: payload.people || [],
+                meta: meta || {}
+              };
+              return [...mapped, newCam];
+            }
+            return mapped;
+          });
+        } catch (e) {}
       };
       ws.onclose = () => {
         wsRef.current = null;
       };
       ws.onerror = () => {
+        wsRef.current = null;
       };
     } catch (e) {
       wsRef.current = null;
     }
     return () => {
       if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {}
+        try { wsRef.current.close(); } catch {}
         wsRef.current = null;
       }
     };
@@ -165,7 +225,6 @@ export default function Camera() {
       setCameras(prev => prev.map(c => c.job_id === tempCam.job_id ? ({ ...c, job_id: jobId, status: "UPLOADING", meta: { is_stream: false } }) : c));
     } catch (e) {
       setCameras(prev => prev.filter(c => c.job_id !== tempCam.job_id));
-      console.error("create job error", e);
       return;
     }
     try {
@@ -173,8 +232,79 @@ export default function Camera() {
       setCameras(prev => prev.map(c => (String(c.job_id) === String(jobId) ? ({ ...c, status: "PROCESSING", videoUrl: localPreview }) : c)));
     } catch (e) {
       setCameras(prev => prev.map(c => (String(c.job_id) === String(jobId) ? ({ ...c, status: "UPLOAD_FAILED" }) : c)));
-      console.error("upload error", e);
     }
+  };
+
+  const createCameraOnServer = async ({ name, location, stream_url }) => {
+    const payload = { name, location, stream_url };
+    const res = await fetch(`${API_BASE}/cameras`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Failed creating camera: ${res.status} ${txt}`);
+    }
+    return await res.json();
+  };
+
+  const startStreamOnServer = async ({ stream_url, camera_id }) => {
+    const res = await fetch(`${API_BASE}/streams`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stream_url, camera_id })
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Failed to start stream: ${res.status} ${txt}`);
+    }
+    return await res.json();
+  };
+
+  const handleAddCameraSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg("");
+    setAddingCamera(true);
+    try {
+      const camRes = await createCameraOnServer({ name: newCamName || `Camera`, location: newCamLocation || "", stream_url: newCamRtsp });
+      const cameraId = camRes.camera_id ?? camRes.id;
+      const streamRes = await startStreamOnServer({ stream_url: newCamRtsp, camera_id: cameraId });
+      const jobId = streamRes.job_id ?? streamRes.jobId ?? null;
+      const added = {
+        job_id: jobId,
+        camera_id: cameraId,
+        title: newCamName || `Camera ${cameraId}`,
+        location: newCamLocation || "",
+        status: jobId ? "LIVE" : "STARTED",
+        videoUrl: null,
+        frameSrc: null,
+        latest_people: [],
+        meta: { stream_url: newCamRtsp }
+      };
+      setCameras(prev => [...prev, added]);
+      setShowAddModal(false);
+      setNewCamName("");
+      setNewCamLocation("");
+      setNewCamRtsp("");
+    } catch (err) {
+      setErrorMsg(err.message || "Failed to add camera");
+    } finally {
+      setAddingCamera(false);
+    }
+  };
+
+  const handleStopStream = async (cam) => {
+    if (!cam || !cam.job_id) return;
+    try {
+      const res = await fetch(`${API_BASE}/streams/${cam.job_id}/stop`, { method: "POST" });
+      if (res.ok) {
+        setCameras(prev => prev.map(c => String(c.job_id) === String(cam.job_id) ? ({ ...c, status: "STOPPED" }) : c));
+        if (selectedCamera && String(selectedCamera.job_id) === String(cam.job_id)) {
+          setSelectedCamera({ ...selectedCamera, status: "STOPPED" });
+        }
+      }
+    } catch (e) {}
   };
 
   return (
@@ -234,7 +364,10 @@ export default function Camera() {
             <FiUpload size={18} />
             <span className="hidden md:inline">Upload Video</span>
           </button>
-          <button className="px-4 py-3 bg-[#19325C] text-white rounded-lg hover:bg-[#5388DF] transition flex items-center gap-2">
+          <button
+            className="px-4 py-3 bg-[#19325C] text-white rounded-lg hover:bg-[#5388DF] transition flex items-center gap-2"
+            onClick={() => setShowAddModal(true)}
+          >
             <FiCamera size={18} />
             <span className="hidden md:inline">Add Camera</span>
           </button>
@@ -264,9 +397,9 @@ export default function Camera() {
             .filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
             .map((camera, index) => (
               <ImageCard
-                key={camera.job_id || index}
+                key={camera.job_id || camera.camera_id || index}
                 image={camera.frameSrc || camera.videoUrl}
-                title={camera.title}
+                title={camera.title + (camera.location ? ` • ${camera.location}` : "")}
                 time={formattedTime}
                 status={camera.status}
                 onClick={() => handleCameraClick(camera)}
@@ -288,6 +421,9 @@ export default function Camera() {
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-300">{selectedCamera.status}</span>
                 <button className="text-gray-300 px-3 py-1 rounded bg-gray-800" onClick={() => setSelectedCamera(null)}>Close</button>
+                {selectedCamera.job_id && selectedCamera.status === "LIVE" && (
+                  <button className="text-gray-300 px-3 py-1 rounded bg-red-700 ml-2" onClick={() => handleStopStream(selectedCamera)}>Stop Stream</button>
+                )}
               </div>
             </div>
             <div className="w-full h-[60vh] bg-black rounded overflow-hidden flex items-center justify-center">
@@ -300,6 +436,35 @@ export default function Camera() {
             <div className="mt-3 text-xs text-gray-300">
               <pre className="text-xs text-gray-400 max-h-32 overflow-auto">{JSON.stringify(selectedCamera.latest_people || [], null, 2)}</pre>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-[#111214] rounded-lg w-full max-w-md p-6">
+            <h3 className="text-white text-lg mb-4">Add Camera / Start Live Stream</h3>
+            <form onSubmit={handleAddCameraSubmit} className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Name</label>
+                <input value={newCamName} onChange={(e)=>setNewCamName(e.target.value)} className="w-full px-3 py-2 rounded bg-[#222227] text-gray-200 border border-gray-700" placeholder="Camera name" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Location</label>
+                <input value={newCamLocation} onChange={(e)=>setNewCamLocation(e.target.value)} className="w-full px-3 py-2 rounded bg-[#222227] text-gray-200 border border-gray-700" placeholder="Location (e.g. Warehouse entrance)" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">RTSP / Stream URL</label>
+                <input value={newCamRtsp} onChange={(e)=>setNewCamRtsp(e.target.value)} required className="w-full px-3 py-2 rounded bg-[#222227] text-gray-200 border border-gray-700" placeholder="rtsp://user:pass@ip:554/stream or http://192.168.1.64:8080/video" />
+              </div>
+              {errorMsg && <div className="text-sm text-red-400">{errorMsg}</div>}
+              <div className="flex justify-end gap-2 mt-2">
+                <button type="button" className="px-3 py-2 rounded bg-gray-700 text-white" onClick={()=>{ setShowAddModal(false); setErrorMsg(""); }}>Cancel</button>
+                <button type="submit" disabled={addingCamera} className="px-4 py-2 rounded bg-[#5388DF] text-white">
+                  {addingCamera ? "Adding…" : "Add & Start Stream"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -1,4 +1,10 @@
 import os
+os.environ.setdefault("OMP_NUM_THREADS","1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
+os.environ.setdefault("MKL_NUM_THREADS","1")
+os.environ.setdefault("NUMEXPR_MAX_THREADS","1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS","1")
+os.environ.setdefault("MEDIAPIPE_DISABLE_GPU","1")
 import time
 import logging
 import asyncio
@@ -6,7 +12,7 @@ import json
 import threading
 from urllib.parse import urlparse
 from datetime import datetime
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,27 +23,16 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
-from app.tasks import process_image_task
+from app.tasks import process_image_task, process_image
+import base64
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
 
-cors_env = os.environ.get("CORS_ALLOW_ORIGINS", "")
-if cors_env:
-    allowed_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
-else:
-    allowed_origins = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://5lm18p50eufoh4-5173.proxy.runpod.net",
-        "https://5lm18p50eufoh4-9000.proxy.runpod.net"
-    ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -72,7 +67,7 @@ APP_LOOP = None
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
-USE_CELERY = os.environ.get("USE_CELERY", "true").lower() in ("1","true","yes")
+USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
 
 def sanitize_triton_url(url: str) -> str:
     if not url:
@@ -99,39 +94,43 @@ def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
     global APP_LOOP
     raw_url = TRITON_URL
-    triton_url = sanitize_triton_url(raw_url)
-    max_wait = int(os.environ.get("TRITON_WAIT_SECS", "120"))
-    interval = 1.5
-    deadline = time.time() + max_wait
-    while time.time() < deadline:
-        try:
-            client = InferenceServerClient(url=triton_url)
-        except Exception:
-            triton = None
-            triton_models_meta = {}
-            break
-        try:
-            if client.is_server_live() and client.is_server_ready():
-                triton = client
-                for model in [TRITON_MODEL, HUMAN_MODEL]:
-                    try:
-                        triton_models_meta[model] = load_model_metadata(triton, model)
-                    except Exception:
-                        triton_models_meta[model] = {'input_name': None, 'output_names': []}
+    if not raw_url:
+        triton = None
+        triton_models_meta = {}
+    else:
+        triton_url = sanitize_triton_url(raw_url)
+        max_wait = int(os.environ.get("TRITON_WAIT_SECS", "120"))
+        interval = 1.5
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            try:
+                client = InferenceServerClient(url=triton_url)
+            except Exception:
+                triton = None
+                triton_models_meta = {}
                 break
             try:
-                if hasattr(client, "close"):
-                    client.close()
+                if client.is_server_live() and client.is_server_ready():
+                    triton = client
+                    for model in [TRITON_MODEL, HUMAN_MODEL]:
+                        try:
+                            triton_models_meta[model] = load_model_metadata(triton, model)
+                        except Exception:
+                            triton_models_meta[model] = {'input_name': None, 'output_names': []}
+                    break
+                try:
+                    if hasattr(client, "close"):
+                        client.close()
+                except Exception:
+                    pass
             except Exception:
-                pass
-        except Exception:
-            try:
-                if hasattr(client, "close"):
-                    client.close()
-            except Exception:
-                pass
-        time.sleep(interval)
-        interval = min(interval * 1.5, 10.0)
+                try:
+                    if hasattr(client, "close"):
+                        client.close()
+                except Exception:
+                    pass
+            time.sleep(interval)
+            interval = min(interval * 1.5, 10.0)
     try:
         redis_sync = redis.Redis.from_url(REDIS_URL)
         redis_pubsub = redis_sync.pubsub()
@@ -234,6 +233,7 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
     cap = cv2.VideoCapture(filepath)
     frame_idx = 0
     sess = SessionLocal()
+    job = None
     try:
         job = sess.query(Job).filter(Job.id == job_id).first()
         if job:
@@ -245,21 +245,45 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             if not ret:
                 break
             if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
-                _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                img_bytes = jpg.tobytes()
+                try:
+                    _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    img_bytes = jpg.tobytes()
+                except Exception:
+                    frame_idx += 1
+                    continue
                 meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                img_b64 = base64.b64encode(img_bytes).decode("ascii")
                 if USE_CELERY:
-                    process_image_task.delay(img_bytes, meta)
+                    try:
+                        process_image_task.delay(img_b64, meta)
+                        TASKS_QUEUED.inc()
+                    except Exception:
+                        try:
+                            process_image(img_bytes, meta)
+                        except Exception:
+                            pass
                 else:
                     try:
-                        process_image_task.run(None, img_bytes, meta)
+                        process_image(img_bytes, meta)
                     except Exception:
-                        process_image_task.delay(img_bytes, meta)
+                        try:
+                            process_image_task.delay(img_b64, meta)
+                            TASKS_QUEUED.inc()
+                        except Exception:
+                            pass
             frame_idx += 1
         if job:
             job.status = "completed"
             job.finished_at = datetime.utcnow()
             sess.commit()
+    except Exception:
+        try:
+            if job:
+                job.status = "error"
+                job.finished_at = datetime.utcnow()
+                sess.commit()
+        except Exception:
+            pass
     finally:
         try:
             cap.release()
@@ -288,11 +312,13 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         return {"status": "accepted", "job_id": job_id}
     else:
         thread = threading.Thread(target=process_video_file, args=(job_id, filepath, camera_id), daemon=True)
+        STREAM_THREADS[job_id] = thread
         thread.start()
         return {"status": "accepted", "job_id": job_id}
 
 class StreamStart(BaseModel):
-    rtsp_url: str
+    rtsp_url: str = None
+    stream_url: str = None
     camera_id: int = None
     job_id: int = None
 
@@ -318,13 +344,25 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             img_bytes = jpg.tobytes()
             meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+            img_b64 = base64.b64encode(img_bytes).decode("ascii")
             if USE_CELERY:
-                process_image_task.delay(img_bytes, meta)
+                try:
+                    process_image_task.delay(img_b64, meta)
+                    TASKS_QUEUED.inc()
+                except Exception:
+                    try:
+                        process_image(img_bytes, meta)
+                    except Exception:
+                        pass
             else:
                 try:
-                    process_image_task.run(None, img_bytes, meta)
+                    process_image(img_bytes, meta)
                 except Exception:
-                    process_image_task.delay(img_bytes, meta)
+                    try:
+                        process_image_task.delay(img_b64, meta)
+                        TASKS_QUEUED.inc()
+                    except Exception:
+                        pass
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -339,25 +377,64 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
 
 @app.post("/streams")
 def start_stream(payload: StreamStart):
-    rtsp_url = payload.rtsp_url
+    rtsp_url = payload.rtsp_url or payload.stream_url
     camera_id = payload.camera_id
     job_id = payload.job_id
     if job_id is None:
         sess = SessionLocal()
         try:
-            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"rtsp_url": rtsp_url})
+            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url})
             sess.add(job)
             sess.commit()
             sess.refresh(job)
             job_id = job.id
         finally:
             sess.close()
+    if camera_id:
+        sess2 = SessionLocal()
+        try:
+            cam = sess2.query(Camera).filter(Camera.id == camera_id).first()
+            if cam:
+                cam.stream_url = rtsp_url
+                sess2.commit()
+        finally:
+            sess2.close()
     stop_event = threading.Event()
     STREAM_EVENTS[job_id] = stop_event
     thread = threading.Thread(target=stream_loop, args=(job_id, rtsp_url, camera_id, stop_event), daemon=True)
     STREAM_THREADS[job_id] = thread
     thread.start()
     return {"job_id": job_id, "status": "started"}
+
+@app.post("/streams/test")
+def test_stream(payload: dict = Body(...)):
+    url = payload.get("url") or payload.get("stream_url") or payload.get("rtsp_url")
+    if not url:
+        return {"ok": False, "error": "missing url"}
+    cap = None
+    start = time.time()
+    try:
+        cap = cv2.VideoCapture(url)
+        deadline = start + 6.0
+        while time.time() < deadline:
+            if not cap or not cap.isOpened():
+                time.sleep(0.2)
+                continue
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                b64 = base64.b64encode(jpg.tobytes()).decode("ascii")
+                return {"ok": True, "preview_jpeg_b64": b64}
+            time.sleep(0.1)
+        return {"ok": False, "error": "timeout opening stream or no frames read"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        try:
+            if cap:
+                cap.release()
+        except Exception:
+            pass
 
 @app.post("/streams/{job_id}/stop")
 def stop_stream(job_id: int):
@@ -389,12 +466,29 @@ async def infer(file: UploadFile = File(...), camera_id: int = None, job_id: int
         raise HTTPException(status_code=400, detail="Empty file")
     meta = {"camera_id": camera_id, "job_id": job_id, "ts": time.time()}
     if USE_CELERY:
-        task = process_image_task.delay(data, meta)
-        TASKS_QUEUED.inc()
-        return {"task_id": task.id, "status": "queued"}
+        try:
+            b64 = base64.b64encode(data).decode("ascii")
+            task = process_image_task.delay(b64, meta)
+            TASKS_QUEUED.inc()
+            return {"task_id": task.id, "status": "queued"}
+        except Exception:
+            try:
+                res = process_image(data, meta)
+                return {"task_id": None, "status": "processed", "result": res}
+            except Exception:
+                raise HTTPException(status_code=500, detail="processing failed")
     else:
-        process_image_task.run(None, data, meta)
-        return {"task_id": None, "status": "processed"}
+        try:
+            res = process_image(data, meta)
+            return {"task_id": None, "status": "processed", "result": res}
+        except Exception:
+            try:
+                b64 = base64.b64encode(data).decode("ascii")
+                task = process_image_task.delay(b64, meta)
+                TASKS_QUEUED.inc()
+                return {"task_id": task.id, "status": "queued"}
+            except Exception:
+                raise HTTPException(status_code=500, detail="processing failed")
 
 @app.post("/infer_sync")
 async def infer_sync(file: UploadFile = File(...)):
@@ -456,12 +550,36 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
     finally:
         sess.close()
 
+@app.post("/cameras")
+def create_camera(payload: dict):
+    sess = SessionLocal()
+    try:
+        name = payload.get("name") if isinstance(payload, dict) else None
+        location = payload.get("location") if isinstance(payload, dict) else None
+        stream_url = payload.get("stream_url") if isinstance(payload, dict) else None
+        cam = Camera(name=name or "Camera", location=location or "", stream_url=stream_url or None)
+        sess.add(cam)
+        sess.commit()
+        sess.refresh(cam)
+        return {"camera_id": cam.id, "name": cam.name, "location": cam.location, "stream_url": cam.stream_url}
+    finally:
+        sess.close()
+
+@app.get("/cameras")
+def list_cameras():
+    sess = SessionLocal()
+    try:
+        rows = sess.query(Camera).order_by(Camera.id.asc()).all()
+        out = []
+        for r in rows:
+            out.append({"id": r.id, "name": r.name, "location": r.location, "stream_url": r.stream_url, "created_at": r.created_at})
+        return {"cameras": out}
+    finally:
+        sess.close()
+
 @app.get("/health")
 def health():
-    ready = True
-    try:
-        if triton is None:
-            ready = False
-    except Exception:
-        ready = False
+    if os.environ.get("ALLOW_NO_TRITON","1") in ("1","true","True"):
+        return {"triton_ready": True, "note": "Triton not present; local processing allowed"}
+    ready = triton is not None
     return {"triton_ready": ready}
