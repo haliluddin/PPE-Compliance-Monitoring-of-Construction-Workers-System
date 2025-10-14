@@ -84,24 +84,6 @@ class Job(Base):
     # Relationship to violations
     violations = relationship("Violation", back_populates="job")
 
-class Violation(Base):
-    __tablename__ = "violations"
-    id = Column(Integer, primary_key=True)
-#    job_id = Column(Integer, ForeignKey("jobs.id"))
-#    camera_id = Column(Integer, ForeignKey("cameras.id"))
-    worker_id = Column(Integer, ForeignKey("workers.id"))
-    worker_code = Column(Text)
-    violation_types = Column(Text)
-    frame_index = Column(Integer)
-    frame_ts = Column(DateTime(timezone=True))
-    snapshot = Column(LargeBinary)
-    inference = Column(JSON)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    status = Column(String, nullable=False, server_default="pending")
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    worker = relationship("Worker", back_populates="violations")
-    user = relationship("User", back_populates="violations")
-
 
 class Violation(Base):
     __tablename__ = "violations"
