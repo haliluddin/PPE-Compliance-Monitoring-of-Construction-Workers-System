@@ -224,7 +224,8 @@ export default function Incident() {
             >
               <div className="font-medium text-gray-200">{n.worker_code}</div>
               <div className="text-gray-200">{n.worker}</div>
-              <div className="text-gray-300">—</div>
+              <div className="text-gray-300">{n.camera || "Unknown Camera"}</div>
+
               <div className="text-gray-300">{n.violation}</div>
               <div>
                 <span

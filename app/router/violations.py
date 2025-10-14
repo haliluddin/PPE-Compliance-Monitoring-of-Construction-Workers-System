@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Violation, Worker, User
+from app.models import Violation, Worker, User, Camera
 from app.router.auth import get_current_user
 from app.schemas import ViolationCreate, ViolationResponse
 
@@ -14,8 +14,9 @@ def get_violations(
     current_user: User = Depends(get_current_user)
 ):
     violations = (
-        db.query(Violation, Worker.fullName)
+        db.query(Violation, Worker.fullName, Camera.name.label("camera_name"), Camera.location.label("camera_location"))
         .join(Worker, Violation.worker_id == Worker.id)
+        .join(Camera, Violation.camera_id == Camera.id)
         .filter(Violation.user_id == current_user.id)  
         .all()
     )
@@ -26,6 +27,7 @@ def get_violations(
             "violation": v.Violation.violation_types,
             "worker": v.fullName,
             "worker_code": v.Violation.worker_code,
+            "camera": v.camera_name or v.camera_location,
             "frame_ts": v.Violation.frame_ts,
             "status": v.Violation.status,
         }
