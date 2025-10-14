@@ -1,3 +1,4 @@
+// frontend/src/pages/WorkersProfile.jsx
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ShieldCheck, Calendar, Search, Filter, ChevronDown } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -380,7 +381,7 @@ export default function WorkersProfile() {
                   >
                     <td className="text-gray-300">{format(parseISO(violation.date), 'MMM d, yyyy hh:mm a')}</td>
                     <td className="text-gray-300">{violation.type}</td>
-                    <td className="text-gray-300">{violation.cameraLocation}</td>
+                   <td className="text-gray-300">{violation.cameraLocation}</td>
                     <td className="text-gray-300">
                       <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
                         <FaEye className="mr-2" />

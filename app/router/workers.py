@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
-from app.models import Worker, Violation
+from app.models import Worker, Violation, Camera
 from app.schemas import WorkerResponse, WorkerCreate
 from app.router.auth import get_current_user
 from typing import List
@@ -93,7 +93,18 @@ def get_worker_profile(
         raise HTTPException(status_code=404, detail="Worker not found")
 
     # Get all violations for this worker
-    violations = db.query(Violation).filter(Violation.worker_id == worker.id).all()
+    violations = (
+        db.query(
+            Violation.id,
+            Violation.frame_ts,
+            Violation.violation_types,
+            Camera.name.label("camera_name"),
+            Camera.location.label("camera_location")
+        )
+        .join(Camera, Violation.camera_id == Camera.id, isouter=True)
+        .filter(Violation.worker_id == worker.id)
+        .all()
+    )
 
     # Map violations to dict for frontend
     violation_history = [
@@ -101,7 +112,7 @@ def get_worker_profile(
             "id": v.id,
             "date": v.frame_ts, 
             "type": v.violation_types,
-            "cameraLocation": getattr(v, "cameraLocation", "N/A")  
+            "cameraLocation": f"{v.camera_name or 'Unknown'} - {v.camera_location or 'N/A'}" 
         }
         for v in violations
     ]
