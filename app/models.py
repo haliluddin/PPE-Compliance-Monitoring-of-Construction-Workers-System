@@ -2,7 +2,7 @@
 from sqlalchemy import Column, Integer, Text, DateTime, JSON, LargeBinary, Boolean, ForeignKey, Column, Integer, String, Date, Text, TIMESTAMP
 # from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from database import Base
+from .database import Base
 from sqlalchemy.sql import func
 
 # Base = declarative_base()
