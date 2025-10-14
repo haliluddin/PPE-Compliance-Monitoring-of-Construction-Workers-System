@@ -5,7 +5,7 @@ from datetime import datetime
 
 db = SessionLocal()
 
-user_id = 2  # <-- adjust based  user
+user_id = 1  # <-- adjust based  user
 
 # Create cameras for this user
 cameras = [

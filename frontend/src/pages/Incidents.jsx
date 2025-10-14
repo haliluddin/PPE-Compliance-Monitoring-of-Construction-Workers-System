@@ -36,7 +36,23 @@ export default function Incident() {
     setFilters((prev) => ({ ...prev, [key]: value }));
   const handleDateChange = (date) => handleChange("date", date);
 
-  const cameraOptions = ["Camera 1", "Camera 2", "Camera 3"];
+ const [cameraOptions, setCameraOptions] = useState([]);
+
+useEffect(() => {
+  const token = localStorage.getItem("token");
+  fetch("http://localhost:8000/cameras/", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error("Unauthorized");
+      return res.json();
+    })
+    .then((data) => setCameraOptions(data))
+    .catch((err) => console.error("Error fetching cameras:", err));
+}, []);
+
   const violationOptions = [
     "No Helmet",
     "No Vest",
@@ -139,10 +155,11 @@ export default function Incident() {
             >
               <option value="">All Camera</option>
               {cameraOptions.map((cam) => (
-                <option key={cam} value={cam}>
-                  {cam}
+                <option key={cam.id} value={cam.name}>
+                  {cam.name} — {cam.location}
                 </option>
               ))}
+
             </select>
           </div>
 
