@@ -32,7 +32,8 @@ def get_workers(
             Worker.status,
             Worker.registered,
             Worker.user_id,
-            func.count(Violation.id).label("totalIncidents")
+            func.count(Violation.id).label("totalIncidents"),
+            func.max(Violation.frame_ts).label("lastSeen")
         )
         .outerjoin(Violation, Violation.worker_id == Worker.id)
         .filter(Worker.user_id == current_user.id)
@@ -53,6 +54,7 @@ def get_workers(
             "registered": w.registered,
             "user_id": w.user_id,
             "totalIncidents": w.totalIncidents,
+             "lastSeen": w.lastSeen.isoformat() if w.lastSeen else None
         }
         for w in workers
     ]

@@ -47,11 +47,22 @@ for c in cameras:
 # You can freely change worker_id or camera_id here to simulate new detections.
 new_violations = [
     Violation(
-        worker_id=workers[2].id,        # link to any worker
-        camera_id=cameras[1].id,        # link to any existing camera
+        worker_id=workers[0].id,        # link to any worker
+        camera_id=cameras[0].id,        # link to any existing camera
         user_id=user_id,
         worker_code=workers[0].worker_code,
-        violation_types="No Helmet",
+        violation_types="No Gloves",
+        frame_index=55,
+        frame_ts=datetime(2025, 10, 14, 15, 30),
+        inference={"detected": True},
+        status="pending",
+    ),
+    Violation(
+        worker_id=workers[0].id,        # link to any worker
+        camera_id=cameras[0].id,        # link to any existing camera
+        user_id=user_id,
+        worker_code=workers[0].worker_code,
+        violation_types="No Boots",
         frame_index=55,
         frame_ts=datetime(2025, 10, 14, 15, 30),
         inference={"detected": True},
