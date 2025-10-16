@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import API from "../api"; // your API helper
 import { NavLink, useNavigate } from "react-router-dom";
 import { 
   FiCamera, FiBell, FiAlertTriangle, 
@@ -8,6 +9,15 @@ import {
 export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
    const navigate = useNavigate();
+const [unreadCount, setUnreadCount] = useState(0); // <--- New
+  
+
+  useEffect(() => {
+    API.get("/notifications").then((res) => {
+      const unread = res.data.filter((n) => !n.is_read).length;
+      setUnreadCount(unread);
+    });
+  }, []);
 
   const handleLogout = () => {
     // Add any logout logic here (clear localStorage, etc)
@@ -47,18 +57,24 @@ export default function Sidebar() {
         {/* Menu items */}
         <nav className="flex-1 mt-4">
           {menuItems.map((item) => (
-            <NavLink
-              key={item.name}
-              to={item.path}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 text-lg hover:bg-white/20
-                 transition rounded-lg m-2 ${isActive ? "bg-white/40" : ""}`
-              }
-            >
-              {item.icon}
-              {!isCollapsed && <span>{item.name}</span>}
-            </NavLink>
-          ))}
+  <NavLink
+    key={item.name}
+    to={item.path}
+    className={({ isActive }) =>
+      `flex items-center gap-3 px-4 py-3 text-lg hover:bg-white/20
+       transition rounded-lg m-2 ${isActive ? "bg-white/40" : ""}`
+    }
+  >
+    <div className="relative">
+      {item.icon}
+      {item.name === "Notifications" && unreadCount > 0 && (
+        <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-[#19325C]" />
+      )}
+    </div>
+    {!isCollapsed && <span>{item.name}</span>}
+  </NavLink>
+))}
+
         </nav>
 
          {/* Logout Button */}
