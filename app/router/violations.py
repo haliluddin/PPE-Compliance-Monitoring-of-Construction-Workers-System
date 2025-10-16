@@ -51,6 +51,7 @@ def create_violation(
         worker_id=violation.worker_id,
         frame_ts=violation.frame_ts,
         worker_code=violation.worker_code,
+        camera_id=violation.camera_id,   # ✅ FIXED
         user_id=current_user.id,
         status="pending",
     )
@@ -71,6 +72,8 @@ def create_violation(
     db.refresh(new_notification)
 
     # 3️⃣ Broadcast the notification via WebSocket
+    camera = db.query(Camera).filter(Camera.id == new_violation.camera_id).first()
+
     notification_data = {
         "id": new_notification.id,
         "message": message,
@@ -78,9 +81,10 @@ def create_violation(
         "created_at": str(new_notification.created_at),
         "violation_type": new_violation.violation_types,
         "worker_code": new_violation.worker_code,
+        "camera": camera.name if camera else "Unknown Camera",
+        "camera_location": camera.location if camera else "Unknown Location",
     }
 
-    # send to all connected clients of this user
     if current_user.id in connected_clients:
         for ws in connected_clients[current_user.id]:
             try:

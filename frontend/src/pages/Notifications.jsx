@@ -18,7 +18,7 @@ export default function Notifications() {
       worker: n.worker_name || "Unknown Worker",
       worker_code: n.worker_code || "N/A",
       violation: n.violation_type || n.message || "Unknown Violation",
-      camera: n.camera || "Unknown Camera",
+      camera: `${n.camera || "Unknown Camera"} (${n.camera_location || "Unknown Location"})`,
       type: n.type || "worker_violation",
       date: n.date || new Date(n.created_at).toLocaleDateString(),
       time: n.time || new Date(n.created_at).toLocaleTimeString(),

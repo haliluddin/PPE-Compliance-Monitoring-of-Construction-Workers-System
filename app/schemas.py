@@ -44,6 +44,7 @@ class ViolationCreate(BaseModel):
     violation_types: str
     worker_id: int
     worker_code: str
+    camera_id: int 
     frame_ts: str 
 
 class ViolationResponse(BaseModel):
