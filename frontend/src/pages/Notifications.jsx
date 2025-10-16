@@ -48,7 +48,7 @@ useEffect(() => {
     setNotifications((prev) => [
       {
         id: data.id,
-        worker: `Worker ${data.worker_code}`,
+        worker: data.worker_name || "Unknown Worker",
         worker_code: data.worker_code,
         violation: data.violation_type,
         camera: `${data.camera} (${data.camera_location})`,

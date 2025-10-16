@@ -72,8 +72,11 @@ def create_violation(
     db.commit()
     db.refresh(new_notification)
 
-    # 3️⃣ Prepare data
+    # ✅ Fetch worker and camera details
+    worker = db.query(Worker).filter(Worker.id == new_violation.worker_id).first()
     camera = db.query(Camera).filter(Camera.id == new_violation.camera_id).first()
+
+    # 3️⃣ Prepare broadcast data
     notification_data = {
         "id": new_notification.id,
         "message": message,
@@ -81,16 +84,16 @@ def create_violation(
         "created_at": str(new_notification.created_at),
         "violation_type": new_violation.violation_types,
         "worker_code": new_violation.worker_code,
+        "worker_name": worker.fullName if worker else "Unknown Worker",
         "camera": camera.name if camera else "Unknown Camera",
         "camera_location": camera.location if camera else "Unknown Location",
     }
 
-    # 4️⃣ Broadcast to WebSocket clients (live)
+    # 4️⃣ Broadcast to WebSocket clients
     try:
         loop = asyncio.get_event_loop()
         loop.create_task(broadcast_notification(current_user.id, notification_data))
     except RuntimeError:
-        # when called from a thread with no running loop
         asyncio.run(broadcast_notification(current_user.id, notification_data))
 
     return new_violation
