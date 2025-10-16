@@ -105,3 +105,13 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
+def verify_token(token: str):
+    """Decode a JWT token and return its payload."""
+    from jose import JWTError, jwt
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload  # returns dict like {"sub": "1", "email": "...", "exp": ...}
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+

@@ -13,6 +13,7 @@ export default function Notifications() {
 
   useEffect(() => {
   API.get("/notifications").then((res) => {
+
     const mapped = res.data.map((n) => ({
       id: n.id,
       worker: n.worker_name || "Unknown Worker",
@@ -27,6 +28,45 @@ export default function Notifications() {
     }));
     setNotifications(mapped);
   });
+}, []);
+
+useEffect(() => {
+  const token = localStorage.getItem("token"); // assuming you store it
+  if (!token) return;
+
+  const ws = new WebSocket(`ws://localhost:8000/ws/notifications?token=${token}`);
+
+  ws.onopen = () => {
+    console.log("✅ Connected to notification WebSocket");
+  };
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log("🔔 New notification received:", data);
+
+    // Add the new notification at the top
+    setNotifications((prev) => [
+      {
+        id: data.id,
+        worker: `Worker ${data.worker_code}`,
+        worker_code: data.worker_code,
+        violation: data.violation_type,
+        camera: `${data.camera} (${data.camera_location})`,
+        type: "worker_violation",
+        date: new Date(data.created_at).toLocaleDateString(),
+        time: new Date(data.created_at).toLocaleTimeString(),
+        isNew: true,
+        resolved: false,
+      },
+      ...prev,
+    ]);
+  };
+
+  ws.onclose = () => {
+    console.log("❌ WebSocket disconnected");
+  };
+
+  return () => ws.close();
 }, []);
 
 
