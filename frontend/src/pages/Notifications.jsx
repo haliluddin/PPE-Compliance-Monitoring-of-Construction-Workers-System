@@ -96,10 +96,29 @@ useEffect(() => {
     });
     
   const menuActions = [
-    { label: "Mark as Unread", onClick: (id) => alert(`Mark ${id} as unread`) },
-    { label: "Delete Notification", onClick: (id) => alert(`Delete ${id}`) },
-    { label: "Report Issue", onClick: (id) => alert(`Report issue for ${id}`) },
-  ];
+  {
+    label: "Mark as Read",
+    onClick: async (id) => {
+      try {
+        await API.post(`/notifications/${id}/mark_read`);
+        setNotifications((prev) =>
+          prev.map((n) => n.id === id ? { ...n, isNew: false } : n)
+        );
+      } catch (err) {
+        console.error("Failed to mark notification as read", err);
+      }
+    },
+  },
+  {
+    label: "Delete Notification",
+    onClick: (id) => alert(`Delete ${id}`),
+  },
+  {
+    label: "Report Issue",
+    onClick: (id) => alert(`Report issue for ${id}`),
+  },
+];
+
 
   const filteredNotifications = notifications
     .filter((n) => {
