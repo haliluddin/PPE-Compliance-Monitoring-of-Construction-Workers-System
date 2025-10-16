@@ -9,7 +9,7 @@ ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJ
 
 headers = {
     "Content-Type": "application/json",
-    "Authorization": f"Bearer {ACCESS_TOKEN}",  # remove if auth not required
+    "Authorization": f"Bearer {ACCESS_TOKEN}",  
 }
 
 # -------------------------
@@ -21,7 +21,7 @@ def get_workers():
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         return res.json()
-    print("❌ Failed to fetch workers:", res.text)
+    print(" Failed to fetch workers:", res.text)
     return []
 
 def get_cameras():
@@ -30,7 +30,7 @@ def get_cameras():
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         return res.json()
-    print("❌ Failed to fetch cameras:", res.text)
+    print("Failed to fetch cameras:", res.text)
     return []
 
 def choose_from_list(items, key_name="name"):
@@ -99,10 +99,10 @@ def main():
     # 5️⃣ Send request
     res = requests.post(f"{API_URL}/violations/", json=payload, headers=headers)
     if res.status_code in (200, 201):
-        print("✅ Violation created successfully!")
+        print(" Violation created successfully!")
         print(res.json())
     else:
-        print("❌ Failed to create violation:", res.status_code, res.text)
+        print("Failed to create violation:", res.status_code, res.text)
 
 # -------------------------
 # Run the script
