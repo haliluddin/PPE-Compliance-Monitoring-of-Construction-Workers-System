@@ -1,40 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import API from "../api";
 import { FaExclamationCircle } from "react-icons/fa";
 import { FiMoreVertical, FiSearch, FiFilter } from "react-icons/fi";
 import { LuBellRing } from "react-icons/lu";
 
 export default function Notifications() {
-  const notifications = [
-    {
-      id: 1,
-      camera: "Camera 1 - Entrance",
-      violation: "No Helmet",
-      worker: "John Doe",
-      workerId: "W456",
-      isNew: true,
-      date: "20 Dec, 2025",
-      time: "11:00:15 AM",
-      imageUrl: "https://images.unsplash.com/photo-1535379453347-1ffd615e2e08?auto=format&fit=crop&w=800&q=80",
-      type: "worker_violation",
-    },
-    {
-      id: 2,
-      camera: "Camera 2 - Ground Floor",
-      violation: "No Vest",
-      worker: "Jane Smith",
-      workerId: "W423",
-      isNew: false,
-      date: "20 Dec, 2025",
-      time: "10:27:03 AM",
-      imageUrl: "https://images.unsplash.com/photo-1549880175-1e43e2a2c1f3?auto=format&fit=crop&w=800&q=80",
-      type: "worker_violation",
-    },
-  ];
-
+  const [notifications, setNotifications] = useState([]);
   const [openMenu, setOpenMenu] = useState(null);
-  const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+ const [filter, setFilter] = useState("all");
 
+
+  useEffect(() => {
+  API.get("/notifications").then((res) => {
+    const mapped = res.data.map((n) => ({
+      id: n.id,
+      worker: n.worker_name || "Unknown Worker",
+      worker_code: n.worker_code || "N/A",
+      violation: n.violation_type || n.message || "Unknown Violation",
+      camera: n.camera || "Unknown Camera",
+      type: n.type || "worker_violation",
+      date: n.date || new Date(n.created_at).toLocaleDateString(),
+      time: n.time || new Date(n.created_at).toLocaleTimeString(),
+      isNew: !n.is_read,
+      resolved: n.resolved ?? false,
+    }));
+    setNotifications(mapped);
+  });
+}, []);
+
+
+  
   const toggleMenu = (id) => {
     setOpenMenu(openMenu === id ? null : id);
   };
@@ -243,9 +239,10 @@ export default function Notifications() {
                     <div className="flex flex-col">
                       {/* Title */}
                       {n.type === 'worker_violation' ? (
-                        <p className="text-white font-semibold text-lg">
-                          Worker {n.id} - {n.worker}
-                        </p>
+                       <p className="text-white font-semibold text-lg">
+                       Worker {n.worker_code} - {n.worker}
+                      </p>
+
                       ) : (
                         <p className="text-white font-semibold text-lg">
                           {n.camera}
