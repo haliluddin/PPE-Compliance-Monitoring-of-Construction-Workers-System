@@ -24,7 +24,7 @@ export default function Sidebar() {
     const token = localStorage.getItem("token");
     if (!token) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/ws/notifications?token=${token}`);
+    const ws = new WebSocket(`ws://127.0.0.1:9000/ws/notifications?token=${token}`);
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
