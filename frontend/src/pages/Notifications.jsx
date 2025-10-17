@@ -3,7 +3,7 @@ import { FaExclamationCircle } from "react-icons/fa";
 import { FiMoreVertical, FiSearch, FiFilter } from "react-icons/fi";
 import { LuBellRing } from "react-icons/lu";
 
-export default function Incident() {
+export default function Notifications() {
   const notifications = [
     {
       id: 1,

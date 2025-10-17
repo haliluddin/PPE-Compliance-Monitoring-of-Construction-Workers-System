@@ -257,7 +257,16 @@ export default function Workers() {
               {w.worker_code}
             </div>
             <div className="text-gray-200">{w.fullName}</div>
-            <div className="text-gray-300">{w.lastSeen || "-"}</div>
+            <div className="text-gray-300">
+              {w.lastSeen ? new Date(w.lastSeen).toLocaleString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+              }) : "-"}
+            </div>
+
             <div>{w.totalIncidents || 0}</div>
             <div className="text-center">
               <Link
