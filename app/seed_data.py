@@ -5,10 +5,10 @@ from datetime import datetime
 
 db = SessionLocal()
 
-user_id = 1  # user
+user_id = 2  # user
 
 camera_data = [
-    {"name": "Entrance Cam", "location": "Main Gate"},
+    {"name": "2nd Floor", "location": "Main Gate"},
     {"name": "North Site Cam", "location": "North Wing"},
 ]
 
@@ -44,23 +44,23 @@ for c in cameras:
     print(f" - {c.id}: {c.name} ({c.location})")
 
 
-new_violations = [
-    Violation(
-        worker_id=workers[2].id,        #  worker
-        camera_id=cameras[0].id,        #  camera
-        user_id=user_id,
-        worker_code=workers[0].worker_code,
-        violation_types="No Helmet",
-        frame_index=55,
-        frame_ts=datetime(2025, 10, 14, 15, 30),
-        inference={"detected": True},
-        status="pending",
-    )
-]
+# new_violations = [
+#     Violation(
+#         worker_id=workers[2].id,        #  worker
+#         camera_id=cameras[0].id,        #  camera
+#         user_id=user_id,
+#         worker_code=workers[0].worker_code,
+#         violation_types="No Helmet",
+#         frame_index=55,
+#         frame_ts=datetime(2025, 10, 14, 15, 30),
+#         inference={"detected": True},
+#         status="pending",
+#     )
+# ]
 
-# Add and commit
-db.add_all(new_violations)
-db.commit()
-print("\n New violation(s) added successfully!")
+# # Add and commit
+# db.add_all(new_violations)
+# db.commit()
+# print("\n New violation(s) added successfully!")
 
 db.close()

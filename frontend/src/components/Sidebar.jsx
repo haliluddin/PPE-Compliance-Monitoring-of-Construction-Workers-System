@@ -1,12 +1,15 @@
+// frontend/src/components/Sidebar.jsx
+
 import { useEffect, useState } from "react";
 import API from "../api";
 import { NavLink, useNavigate } from "react-router-dom";
 import { FiCamera, FiBell, FiAlertTriangle, FiUsers, FiFileText, FiMenu, FiLogOut } from "react-icons/fi";
+import { useUnread } from "../context/UnreadContext";
 
 export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const navigate = useNavigate();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const { unreadCount, setUnreadCount } = useUnread();
 
   // Fetch initial unread count
   useEffect(() => {

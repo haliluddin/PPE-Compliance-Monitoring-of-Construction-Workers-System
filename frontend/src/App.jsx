@@ -1,3 +1,4 @@
+// frontend/src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -10,6 +11,7 @@ import Reports from "./pages/Reports";
 import WorkersProfile from "./pages/WorkersProfile";
 import Register from "./pages/Register";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { UnreadProvider } from "./context/UnreadContext";
 
 function App() {
   return (
@@ -27,6 +29,7 @@ function App() {
         element={
           <ProtectedRoute>
             <div className="flex">
+               <UnreadProvider>
               <Sidebar />
               <div className="flex-1 bg-[#1E1F23] min-h-screen">
                 <Header />
@@ -43,6 +46,7 @@ function App() {
                   </Routes>
                 </div>
               </div>
+              </UnreadProvider>
             </div>
           </ProtectedRoute>
         }
