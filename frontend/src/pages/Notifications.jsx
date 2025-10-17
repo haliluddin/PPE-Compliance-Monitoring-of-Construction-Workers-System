@@ -100,7 +100,7 @@ export default function Notifications() {
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, isNew: false } : n))
       );
-      // Unread count will automatically sync via useEffect
+      // Unread count
     } catch (err) {
       console.error("Failed to mark notification as read", err);
     }

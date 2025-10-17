@@ -46,7 +46,7 @@ def create_violation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 1️⃣ Create violation
+    
     new_violation = Violation(
         violation_types=violation.violation_types,
         worker_id=violation.worker_id,
@@ -60,7 +60,7 @@ def create_violation(
     db.commit()
     db.refresh(new_violation)
 
-    # 2️⃣ Create notification
+    
     message = f"New violation detected: {new_violation.violation_types} by worker code {new_violation.worker_code}"
     new_notification = Notification(
         message=message,
@@ -72,11 +72,11 @@ def create_violation(
     db.commit()
     db.refresh(new_notification)
 
-    # ✅ Fetch worker and camera details
+   
     worker = db.query(Worker).filter(Worker.id == new_violation.worker_id).first()
     camera = db.query(Camera).filter(Camera.id == new_violation.camera_id).first()
 
-    # 3️⃣ Prepare broadcast data
+    
     notification_data = {
         "id": new_notification.id,
         "message": message,
@@ -89,7 +89,7 @@ def create_violation(
         "camera_location": camera.location if camera else "Unknown Location",
     }
 
-    # 4️⃣ Broadcast to WebSocket clients
+   
     try:
         loop = asyncio.get_event_loop()
         loop.create_task(broadcast_notification(current_user.id, notification_data))

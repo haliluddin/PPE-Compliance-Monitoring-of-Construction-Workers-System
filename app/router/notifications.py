@@ -12,7 +12,7 @@ def get_notifications(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # use outerjoin for safe left joins
+  
     notifications = (
         db.query(
             Notification,
