@@ -27,10 +27,9 @@ export default function Notifications() {
     setFilters((prev) => ({ ...prev, [filterName]: value }));
   };
 
-  // Persistent audio
+  
   const audio = new Audio("/notification.mp3");
 
-  // Request Notification permission on first user interaction
   useEffect(() => {
     const requestPermission = () => {
       if (Notification.permission !== "granted" && Notification.permission !== "denied") {
@@ -44,7 +43,7 @@ export default function Notifications() {
     return () => window.removeEventListener("click", requestPermission);
   }, []);
 
-  // Fetch notifications on load
+
   useEffect(() => {
     API.get("/notifications").then((res) => {
       const mapped = res.data.map((n) => ({
@@ -63,7 +62,7 @@ export default function Notifications() {
     });
   }, []);
 
-  // Flash tab title on new notifications
+
   useEffect(() => {
     let originalTitle = document.title;
     let flashInterval;
@@ -85,13 +84,13 @@ export default function Notifications() {
     return () => clearInterval(flashInterval);
   }, [notifications]);
 
-  // Update unread count in context
+
   useEffect(() => {
     const unread = notifications.filter((n) => n.isNew).length;
     setUnreadCount(unread);
   }, [notifications, setUnreadCount]);
 
-  // WebSocket for live notifications
+ 
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -104,10 +103,10 @@ export default function Notifications() {
       const data = JSON.parse(event.data);
       console.log("New notification received:", data);
 
-      // Play audio
+      
       audio.play().catch((err) => console.error("Audio play failed:", err));
 
-      // Browser notification if page is hidden
+      
       if (document.hidden && Notification.permission === "granted") {
         new Notification("Violation Detected!", {
           body: `${data.worker_name || "Unknown Worker"} - ${data.violation_type || data.message}`,
