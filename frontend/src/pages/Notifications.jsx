@@ -27,6 +27,23 @@ export default function Notifications() {
     setFilters((prev) => ({ ...prev, [filterName]: value }));
   };
 
+  // Persistent audio
+  const audio = new Audio("/notification.mp3");
+
+  // Request Notification permission on first user interaction
+  useEffect(() => {
+    const requestPermission = () => {
+      if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+        Notification.requestPermission().then((perm) => {
+          console.log("Notification permission:", perm);
+        });
+      }
+    };
+
+    window.addEventListener("click", requestPermission, { once: true });
+    return () => window.removeEventListener("click", requestPermission);
+  }, []);
+
   // Fetch notifications on load
   useEffect(() => {
     API.get("/notifications").then((res) => {
@@ -68,30 +85,29 @@ export default function Notifications() {
     return () => clearInterval(flashInterval);
   }, [notifications]);
 
-
+  // Update unread count in context
   useEffect(() => {
     const unread = notifications.filter((n) => n.isNew).length;
     setUnreadCount(unread);
   }, [notifications, setUnreadCount]);
 
-
+  // WebSocket for live notifications
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
 
     const ws = new WebSocket(`ws://localhost:8000/ws/notifications?token=${token}`);
-    const audio = new Audio("/notification.mp3");
 
     ws.onopen = () => console.log("Connected to notification WebSocket");
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log(" New notification received:", data);
+      console.log("New notification received:", data);
 
-     
+      // Play audio
       audio.play().catch((err) => console.error("Audio play failed:", err));
 
-  
+      // Browser notification if page is hidden
       if (document.hidden && Notification.permission === "granted") {
         new Notification("Violation Detected!", {
           body: `${data.worker_name || "Unknown Worker"} - ${data.violation_type || data.message}`,
@@ -115,15 +131,10 @@ export default function Notifications() {
       setNotifications((prev) => [newNotification, ...prev]);
     };
 
-    ws.onclose = () => console.log(" WebSocket disconnected");
-
-  
-    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
-      Notification.requestPermission();
-    }
+    ws.onclose = () => console.log("WebSocket disconnected");
 
     return () => ws.close();
-  }, []);
+  }, [audio]);
 
   const toggleMenu = (id) => setOpenMenu(openMenu === id ? null : id);
 
@@ -139,7 +150,6 @@ export default function Notifications() {
     }
   };
 
-
   const menuActions = [
     { label: "Mark as Read", onClick: markAsRead },
     { label: "Delete Notification", onClick: (id) => alert(`Delete ${id}`) },
@@ -147,34 +157,33 @@ export default function Notifications() {
   ];
 
   const filteredNotifications = notifications
-  .filter((n) => {
-    if (
-      searchQuery &&
-      !(
-        (n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter((n) => {
+      if (
+        searchQuery &&
+        !(
+          (n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
+        )
       )
-    )
-      return false;
-    if (filters.camera && n.camera !== filters.camera) return false;
-    if (filters.violation && n.violation !== filters.violation) return false;
-    if (filter === "unread" && !n.isNew) return false;
-    return true;
-  })
-  .sort((a, b) => {
-    // 1️⃣ Unread first
-    if (a.isNew && !b.isNew) return -1;
-    if (!a.isNew && b.isNew) return 1;
+        return false;
+      if (filters.camera && n.camera !== filters.camera) return false;
+      if (filters.violation && n.violation !== filters.violation) return false;
+      if (filter === "unread" && !n.isNew) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      // Unread at top
+      if (a.isNew && !b.isNew) return -1;
+      if (!a.isNew && b.isNew) return 1;
 
-    // 2️⃣ Then sort by chosen filter
-    if (filters.sortBy === "Oldest") {
-      return new Date(a.date + " " + a.time) - new Date(b.date + " " + b.time);
-    } else {
-      return new Date(b.date + " " + b.time) - new Date(a.date + " " + a.time);
-    }
-  });
-
+      // Then sort by chosen filter
+      if (filters.sortBy === "Oldest") {
+        return new Date(a.date + " " + a.time) - new Date(b.date + " " + b.time);
+      } else {
+        return new Date(b.date + " " + b.time) - new Date(a.date + " " + a.time);
+      }
+    });
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-8">
