@@ -1,43 +1,16 @@
-# app/router/cameras.py
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+# app/routers/cameras.py
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Camera  # your SQLAlchemy Camera model
+from app.models import Camera, User
+from app.router.auth import get_current_user
 
-router = APIRouter(
-    prefix="/cameras",
-    tags=["cameras"],
-)
+router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
-# Schema for creating a camera
-class CameraCreateSchema(BaseModel):
-    name: str
-    ip_address: str
-    rtsp_url: str
-    username: str = ""
-    password: str = ""
-
-# GET all cameras
 @router.get("/")
-async def get_cameras(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Camera))
-    cameras = result.scalars().all()
-    return cameras
-
-# POST a new camera
-@router.post("/")
-async def add_camera(data: CameraCreateSchema, db: AsyncSession = Depends(get_db)):
-    new_camera = Camera(
-        name=data.name,
-        ip_address=data.ip_address,
-        rtsp_url=data.rtsp_url,
-        username=data.username,
-        password=data.password,
-        status="LIVE"
-    )
-    db.add(new_camera)
-    await db.commit()
-    await db.refresh(new_camera)
-    return new_camera
+def get_cameras(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    cameras = db.query(Camera).filter(Camera.user_id == current_user.id).all()
+    return [{"id": c.id, "name": c.name, "location": c.location} for c in cameras]
