@@ -130,6 +130,7 @@ export default function Notifications() {
   const markAsRead = async (id) => {
     try {
       await API.post(`/notifications/${id}/mark_read`);
+
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, isNew: false } : n))
       );
@@ -138,6 +139,7 @@ export default function Notifications() {
     }
   };
 
+
   const menuActions = [
     { label: "Mark as Read", onClick: markAsRead },
     { label: "Delete Notification", onClick: (id) => alert(`Delete ${id}`) },
@@ -145,28 +147,34 @@ export default function Notifications() {
   ];
 
   const filteredNotifications = notifications
-    .filter((n) => {
-      if (
-        searchQuery &&
-        !(
-          (n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
-        )
+  .filter((n) => {
+    if (
+      searchQuery &&
+      !(
+        (n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
       )
-        return false;
-      if (filters.camera && n.camera !== filters.camera) return false;
-      if (filters.violation && n.violation !== filters.violation) return false;
-      if (filter === "unread" && !n.isNew) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      if (filters.sortBy === "Oldest") {
-        return new Date(a.date + " " + a.time) - new Date(b.date + " " + b.time);
-      } else {
-        return new Date(b.date + " " + b.time) - new Date(a.date + " " + a.time);
-      }
-    });
+    )
+      return false;
+    if (filters.camera && n.camera !== filters.camera) return false;
+    if (filters.violation && n.violation !== filters.violation) return false;
+    if (filter === "unread" && !n.isNew) return false;
+    return true;
+  })
+  .sort((a, b) => {
+    // 1️⃣ Unread first
+    if (a.isNew && !b.isNew) return -1;
+    if (!a.isNew && b.isNew) return 1;
+
+    // 2️⃣ Then sort by chosen filter
+    if (filters.sortBy === "Oldest") {
+      return new Date(a.date + " " + a.time) - new Date(b.date + " " + b.time);
+    } else {
+      return new Date(b.date + " " + b.time) - new Date(a.date + " " + a.time);
+    }
+  });
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-8">
