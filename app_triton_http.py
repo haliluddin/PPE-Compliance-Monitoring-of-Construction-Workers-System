@@ -50,14 +50,20 @@ except Exception:
     pass
 
 try:
-    from app.router.cameras import router as workers_router
-    app.include_router(workers_router)
+    from app.router.cameras import router as cameras_router
+    app.include_router(cameras_router)
 except Exception:
     pass
 
 try:
-    from app.router.violations import router as workers_router
-    app.include_router(workers_router)
+    from app.router.violations import router as violations_router
+    app.include_router(violations_router)
+except Exception:
+    pass
+
+try:
+    from app.router.notifications import router as notifications_router
+    app.include_router(notifications_router)
 except Exception:
     pass
 
