@@ -1,4 +1,5 @@
 # app/main.py
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.router.auth import router as auth_router
@@ -8,12 +9,14 @@ from app.router.violations import router as violations_router
 from app.router.notifications import router as notifications_router
 from app.router.notifications_ws import router as notifications_ws_router
 
+
 app = FastAPI()
 
 origins = [
     "http://localhost:5173", 
      "http://localhost:8000",
 ]
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,3 +32,4 @@ app.include_router(workers_router)
 app.include_router(violations_router)
 app.include_router(notifications_router)
 app.include_router(notifications_ws_router)
+

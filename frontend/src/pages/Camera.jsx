@@ -1,4 +1,4 @@
-import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiSettings, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
+import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
 import ImageCard from "../components/ImageCard";
 import { useState, useEffect, useRef } from "react";
 
@@ -30,7 +30,6 @@ export default function Camera() {
   const [searchQuery, setSearchQuery] = useState("");
   const [cameras, setCameras] = useState([]);
   const [backendMsg, setBackendMsg] = useState("");
-  const [selectedCamera, setSelectedCamera] = useState(null);
   const wsRef = useRef(null);
   const fileInputRef = useRef(null);
   const wsPath = (WS_BASE || "").replace(/\/+$/, "") + "/ws";
@@ -41,6 +40,8 @@ export default function Camera() {
   const [newCamRtsp, setNewCamRtsp] = useState("");
   const [addingCamera, setAddingCamera] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  const [selectedCameraJobId, setSelectedCameraJobId] = useState(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -72,7 +73,7 @@ export default function Camera() {
         const normalized = list.map((c, i) => ({
           job_id: c.job_id ?? null,
           camera_id: c.id ?? c.camera_id ?? c.cameraId ?? null,
-          title: c.name || `Camera ${c.id ?? i + 1}`,
+          title: c.location || c.name || `Camera ${c.id ?? i + 1}`,
           location: c.location || "",
           status: "IDLE",
           videoUrl: null,
@@ -162,12 +163,13 @@ export default function Camera() {
   ];
 
   const handleCameraClick = (camera) => {
-    setSelectedCamera(camera);
+    if (!camera) return;
+    setSelectedCameraJobId(camera.job_id ?? null);
   };
 
   const handleRemoveCamera = (cameraJobId) => {
     setCameras((prev) => prev.filter((c) => String(c.job_id) !== String(cameraJobId)));
-    if (selectedCamera && String(selectedCamera.job_id) === String(cameraJobId)) setSelectedCamera(null);
+    if (selectedCameraJobId && String(selectedCameraJobId) === String(cameraJobId)) setSelectedCameraJobId(null);
   };
 
   const createJob = async (file, opts = {}) => {
@@ -210,19 +212,19 @@ export default function Camera() {
     const localPreview = URL.createObjectURL(file);
     const tempCam = {
       job_id: `tmp-${Date.now()}`,
-      title: `Camera ${cameras.length + 1}`,
+      title: file.name,
       status: "UPLOADING",
       videoUrl: localPreview,
       frameSrc: null,
       latest_people: [],
       is_stream: false,
-      meta: { is_stream: false }
+      meta: { is_stream: false, title: file.name }
     };
     setCameras(prev => [...prev, tempCam]);
     let jobId;
     try {
       jobId = await createJob(file, { title: `Upload ${file.name}`, source: "camera-ui", is_stream: false });
-      setCameras(prev => prev.map(c => c.job_id === tempCam.job_id ? ({ ...c, job_id: jobId, status: "UPLOADING", meta: { is_stream: false } }) : c));
+      setCameras(prev => prev.map(c => c.job_id === tempCam.job_id ? ({ ...c, job_id: jobId, status: "UPLOADING", meta: { ...c.meta, job_id: jobId } }) : c));
     } catch (e) {
       setCameras(prev => prev.filter(c => c.job_id !== tempCam.job_id));
       return;
@@ -274,13 +276,13 @@ export default function Camera() {
       const added = {
         job_id: jobId,
         camera_id: cameraId,
-        title: newCamName || `Camera ${cameraId}`,
+        title: newCamLocation || newCamName || `Camera ${cameraId}`,
         location: newCamLocation || "",
         status: jobId ? "LIVE" : "STARTED",
         videoUrl: null,
         frameSrc: null,
         latest_people: [],
-        meta: { stream_url: newCamRtsp }
+        meta: { stream_url: newCamRtsp, is_stream: true }
       };
       setCameras(prev => [...prev, added]);
       setShowAddModal(false);
@@ -294,18 +296,22 @@ export default function Camera() {
     }
   };
 
-  const handleStopStream = async (cam) => {
-    if (!cam || !cam.job_id) return;
+  const handleStopStream = async (jobId) => {
+    if (!jobId) return;
     try {
-      const res = await fetch(`${API_BASE}/streams/${cam.job_id}/stop`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/streams/${jobId}/stop`, { method: "POST" });
       if (res.ok) {
-        setCameras(prev => prev.map(c => String(c.job_id) === String(cam.job_id) ? ({ ...c, status: "STOPPED" }) : c));
-        if (selectedCamera && String(selectedCamera.job_id) === String(cam.job_id)) {
-          setSelectedCamera({ ...selectedCamera, status: "STOPPED" });
+        setCameras(prev => prev.map(c => String(c.job_id) === String(jobId) ? ({ ...c, status: "STOPPED" }) : c));
+        if (selectedCameraJobId && String(selectedCameraJobId) === String(jobId)) {
+          setSelectedCameraJobId(null);
         }
       }
     } catch (e) {}
   };
+
+  const nonExpandableStatuses = ["PROCESSING", "UPLOADING", "IDLE", "STARTED", "UPLOAD_FAILED", "STOPPED"];
+
+  const selectedCamera = cameras.find(c => String(c.job_id) === String(selectedCameraJobId)) || null;
 
   return (
     <div className="p-8 text-gray-100 bg-[#1E1F23] min-h-screen">
@@ -337,15 +343,6 @@ export default function Camera() {
             value={searchQuery}
           />
           <FiSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-        </div>
-
-        <div className="w-full md:w-64">
-          <select className="w-full px-4 py-3 border border-gray-700 rounded-lg bg-[#2A2B30] text-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#5388DF]">
-            <option value="">All Camera Groups</option>
-            <option>Entrance Area</option>
-            <option>Main Site</option>
-            <option>Warehouse</option>
-          </select>
         </div>
 
         <div className="flex gap-2">
@@ -395,21 +392,31 @@ export default function Camera() {
         <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {cameras
             .filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
-            .map((camera, index) => (
-              <ImageCard
-                key={camera.job_id || camera.camera_id || index}
-                image={camera.frameSrc || camera.videoUrl}
-                title={camera.title + (camera.location ? ` • ${camera.location}` : "")}
-                time={formattedTime}
-                status={camera.status}
-                onClick={() => handleCameraClick(camera)}
-                onRemove={() => handleRemoveCamera(camera.job_id)}
-                actionIcons={[
-                  { icon: <FiMaximize2 size={16} />, onClick: () => handleCameraClick(camera) },
-                  { icon: <FiSettings size={16} />, onClick: () => console.log(`Settings ${camera.title}`) },
-                ]}
-              />
-            ))}
+            .map((camera, index) => {
+              const isExpandable = !nonExpandableStatuses.includes(String(camera.status).toUpperCase());
+              const displayedTitle = (camera.videoUrl && (!camera.meta || camera.meta.is_stream === false)) ? (camera.meta?.title || camera.title) : (camera.location || camera.title);
+              return (
+                <div
+                  key={camera.job_id || camera.camera_id || index}
+                  className={`relative rounded-lg ${isExpandable ? "cursor-pointer hover:scale-105 transition-transform" : "opacity-80"}`}
+                  onClick={() => { if (isExpandable) handleCameraClick(camera); }}
+                >
+                  <ImageCard
+                    image={camera.frameSrc || camera.videoUrl}
+                    title={displayedTitle}
+                    time={formattedTime}
+                    status={camera.status}
+                    onClick={isExpandable ? () => handleCameraClick(camera) : undefined}
+                    actionIcons={[...(isExpandable ? [{ icon: <FiMaximize2 size={16} />, onClick: () => handleCameraClick(camera) }] : [])]}
+                  />
+
+                  {!isExpandable && (
+                    <div className="absolute inset-0 z-40 bg-transparent cursor-not-allowed" onClick={(e)=>e.stopPropagation()} />
+                  )}
+
+                </div>
+              );
+            })}
         </div>
       </section>
 
@@ -420,9 +427,9 @@ export default function Camera() {
               <h3 className="text-white font-semibold">{selectedCamera.title}</h3>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-300">{selectedCamera.status}</span>
-                <button className="text-gray-300 px-3 py-1 rounded bg-gray-800" onClick={() => setSelectedCamera(null)}>Close</button>
+                <button className="text-gray-300 px-3 py-1 rounded bg-gray-800" onClick={() => setSelectedCameraJobId(null)}>Close</button>
                 {selectedCamera.job_id && selectedCamera.status === "LIVE" && (
-                  <button className="text-gray-300 px-3 py-1 rounded bg-red-700 ml-2" onClick={() => handleStopStream(selectedCamera)}>Stop Stream</button>
+                  <button className="text-gray-300 px-3 py-1 rounded bg-red-700 ml-2" onClick={() => handleStopStream(selectedCamera.job_id)}>Stop Stream</button>
                 )}
               </div>
             </div>

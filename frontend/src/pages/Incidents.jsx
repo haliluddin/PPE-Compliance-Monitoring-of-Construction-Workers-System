@@ -4,6 +4,7 @@ import { FiSearch, FiCalendar } from "react-icons/fi";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { format } from "date-fns";
+import { API_BASE } from "../config";   // <-- add/remove this line as needed
 
 export default function Incident() {
   const [notifications, setNotifications] = useState([]);
@@ -19,7 +20,8 @@ export default function Incident() {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    fetch("http://localhost:8000/violations/", {
+    //fetch("http://localhost:8000/violations/", {
+    fetch(`${API_BASE}/violations/`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -40,7 +42,8 @@ export default function Incident() {
 
 useEffect(() => {
   const token = localStorage.getItem("token");
-  fetch("http://localhost:8000/cameras/", {
+  //fetch("http://localhost:8000/cameras/", {
+  fetch(`${API_BASE}/cameras/`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
