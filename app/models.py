@@ -1,4 +1,3 @@
-
 # app/models.py
 from sqlalchemy import Column, Integer, Text, DateTime, JSON, LargeBinary, Boolean, ForeignKey, Column, Integer, String, Date, Text, TIMESTAMP
 # from sqlalchemy.ext.declarative import declarative_base
