@@ -46,7 +46,29 @@ export default function Notifications() {
     });
   }, []);
 
-  
+  // Flash tab title on new notifications
+  useEffect(() => {
+    let originalTitle = document.title;
+    let flashInterval;
+
+    const unreadCount = notifications.filter((n) => n.isNew).length;
+
+    if (unreadCount > 0) {
+      let showAlert = true;
+      flashInterval = setInterval(() => {
+        document.title = showAlert
+          ? ` (${unreadCount}) Violation Detected!`
+          : originalTitle;
+        showAlert = !showAlert;
+      }, 1000);
+    } else {
+      document.title = originalTitle;
+    }
+
+    return () => clearInterval(flashInterval);
+  }, [notifications]);
+
+
   useEffect(() => {
     const unread = notifications.filter((n) => n.isNew).length;
     setUnreadCount(unread);
