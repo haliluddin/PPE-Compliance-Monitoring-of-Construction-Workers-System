@@ -24,13 +24,10 @@ export default function Notifications() {
   });
 
   const handleChange = (filterName, value) => {
-    setFilters((prev) => ({
-      ...prev,
-      [filterName]: value,
-    }));
+    setFilters((prev) => ({ ...prev, [filterName]: value }));
   };
 
-  // Fetch notifications
+  // Fetch notifications on load
   useEffect(() => {
     API.get("/notifications").then((res) => {
       const mapped = res.data.map((n) => ({
@@ -49,24 +46,36 @@ export default function Notifications() {
     });
   }, []);
 
-  // Sync unread count whenever notifications change
+  
   useEffect(() => {
     const unread = notifications.filter((n) => n.isNew).length;
     setUnreadCount(unread);
   }, [notifications, setUnreadCount]);
 
-  // WebSocket for live notifications
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
 
     const ws = new WebSocket(`ws://localhost:8000/ws/notifications?token=${token}`);
+    const audio = new Audio("/notification.mp3");
 
-    ws.onopen = () => console.log("✅ Connected to notification WebSocket");
+    ws.onopen = () => console.log("Connected to notification WebSocket");
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log("🔔 New notification received:", data);
+      console.log(" New notification received:", data);
+
+     
+      audio.play().catch((err) => console.error("Audio play failed:", err));
+
+  
+      if (document.hidden && Notification.permission === "granted") {
+        new Notification("Violation Detected!", {
+          body: `${data.worker_name || "Unknown Worker"} - ${data.violation_type || data.message}`,
+          icon: "/alert-icon.png",
+        });
+      }
 
       const newNotification = {
         id: data.id,
@@ -84,23 +93,24 @@ export default function Notifications() {
       setNotifications((prev) => [newNotification, ...prev]);
     };
 
-    ws.onclose = () => console.log("❌ WebSocket disconnected");
+    ws.onclose = () => console.log(" WebSocket disconnected");
+
+  
+    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
 
     return () => ws.close();
   }, []);
 
-  const toggleMenu = (id) => {
-    setOpenMenu(openMenu === id ? null : id);
-  };
+  const toggleMenu = (id) => setOpenMenu(openMenu === id ? null : id);
 
   const markAsRead = async (id) => {
     try {
       await API.post(`/notifications/${id}/mark_read`);
-
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, isNew: false } : n))
       );
-      // Unread count
     } catch (err) {
       console.error("Failed to mark notification as read", err);
     }
@@ -114,7 +124,6 @@ export default function Notifications() {
 
   const filteredNotifications = notifications
     .filter((n) => {
-      // Filter by search query
       if (
         searchQuery &&
         !(
@@ -122,12 +131,11 @@ export default function Notifications() {
           (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
           (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
         )
-      ) return false;
-
+      )
+        return false;
       if (filters.camera && n.camera !== filters.camera) return false;
       if (filters.violation && n.violation !== filters.violation) return false;
       if (filter === "unread" && !n.isNew) return false;
-
       return true;
     })
     .sort((a, b) => {
@@ -166,7 +174,6 @@ export default function Notifications() {
           </div>
 
           <div className="flex flex-wrap gap-4">
-            {/* Camera Filter */}
             <div className="flex flex-col w-48">
               <label className="font-medium text-sm mb-1 text-gray-400">Camera</label>
               <select
@@ -181,7 +188,6 @@ export default function Notifications() {
               </select>
             </div>
 
-            {/* Violation Filter */}
             <div className="flex flex-col w-48">
               <label className="font-medium text-sm mb-1 text-gray-400">Violation Type</label>
               <select
@@ -196,7 +202,6 @@ export default function Notifications() {
               </select>
             </div>
 
-            {/* Sort Filter */}
             <div className="flex flex-col w-48">
               <label className="font-medium text-sm mb-1 text-gray-400">Sort By</label>
               <select
