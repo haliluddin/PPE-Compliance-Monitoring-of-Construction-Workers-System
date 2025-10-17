@@ -12,15 +12,13 @@ from fastapi import HTTPException
 router = APIRouter()
 
 
-# -----------------------------
-# GET workers for current user (with total incidents)
-# -----------------------------
+
 @router.get("/workers")
 def get_workers(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Get workers with their total number of violations
+ 
     workers = (
         db.query(
             Worker.id,
@@ -41,7 +39,7 @@ def get_workers(
         .all()
     )
 
-    # Convert to list of dicts (for frontend)
+   
     return [
         {
             "id": w.id,
@@ -94,7 +92,7 @@ def get_worker_profile(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    # Get all violations for this worker
+ 
     violations = (
         db.query(
             Violation.id,
@@ -108,7 +106,7 @@ def get_worker_profile(
         .all()
     )
 
-    # Map violations to dict for frontend
+    
     violation_history = [
         {
             "id": v.id,

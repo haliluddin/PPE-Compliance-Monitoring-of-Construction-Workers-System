@@ -5,6 +5,11 @@ from app.database import get_db
 from app.models import Violation, Worker, User, Camera
 from app.router.auth import get_current_user
 from app.schemas import ViolationCreate, ViolationResponse
+from app.models import Notification
+from app.router.notifications_ws import connected_clients
+import json
+import asyncio
+from app.router.notifications_ws import connected_clients, broadcast_notification
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
 
@@ -41,16 +46,54 @@ def create_violation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    
     new_violation = Violation(
         violation_types=violation.violation_types,
         worker_id=violation.worker_id,
         frame_ts=violation.frame_ts,
         worker_code=violation.worker_code,
-        user_id=current_user.id,  
+        camera_id=violation.camera_id,
+        user_id=current_user.id,
         status="pending",
     )
     db.add(new_violation)
     db.commit()
     db.refresh(new_violation)
-    return new_violation
 
+    
+    message = f"New violation detected: {new_violation.violation_types} by worker code {new_violation.worker_code}"
+    new_notification = Notification(
+        message=message,
+        user_id=current_user.id,
+        violation_id=new_violation.id,
+        is_read=False,
+    )
+    db.add(new_notification)
+    db.commit()
+    db.refresh(new_notification)
+
+   
+    worker = db.query(Worker).filter(Worker.id == new_violation.worker_id).first()
+    camera = db.query(Camera).filter(Camera.id == new_violation.camera_id).first()
+
+    
+    notification_data = {
+        "id": new_notification.id,
+        "message": message,
+        "is_read": new_notification.is_read,
+        "created_at": str(new_notification.created_at),
+        "violation_type": new_violation.violation_types,
+        "worker_code": new_violation.worker_code,
+        "worker_name": worker.fullName if worker else "Unknown Worker",
+        "camera": camera.name if camera else "Unknown Camera",
+        "camera_location": camera.location if camera else "Unknown Location",
+    }
+
+   
+    try:
+        loop = asyncio.get_event_loop()
+        loop.create_task(broadcast_notification(current_user.id, notification_data))
+    except RuntimeError:
+        asyncio.run(broadcast_notification(current_user.id, notification_data))
+
+    return new_violation
