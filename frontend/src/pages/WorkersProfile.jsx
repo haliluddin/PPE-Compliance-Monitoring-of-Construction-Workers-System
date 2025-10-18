@@ -365,23 +365,40 @@ export default function WorkersProfile() {
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead>
-              <tr className="grid grid-cols-4 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
+              <tr className="grid grid-cols-5 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Date & Time</th>
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Violation Type</th>
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Camera Location</th>
+                <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Status</th>
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Action</th>
               </tr>
             </thead>
+
             <tbody className="space-y-2">
               {filterViolations().length > 0 ? (
                 filterViolations().map((violation, index) => (
                   <tr 
                     key={index} 
-                    className="grid grid-cols-4 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
+                    className="grid grid-cols-5 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
                   >
                     <td className="text-gray-300">{format(parseISO(violation.date), 'MMM d, yyyy hh:mm a')}</td>
                     <td className="text-gray-300">{violation.type}</td>
                    <td className="text-gray-300">{violation.cameraLocation}</td>
+                   <td>
+                    <span
+                      className={`px-3 py-1 text-xs font-medium rounded-full border ${
+                        violation.status === "resolved"
+                          ? "bg-green-900/30 text-green-300 border-green-700"
+                          : violation.status === "pending"
+                          ? "bg-yellow-900/30 text-yellow-300 border-yellow-700"
+                          : violation.status === "false positive"
+                          ? "bg-gray-700/30 text-gray-300 border-gray-600"
+                          : "bg-blue-900/30 text-blue-300 border-blue-700"
+                      }`}
+                    >
+                      {violation.status || "Pending"}
+                    </span>
+                  </td>
                     <td className="text-gray-300">
                       <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
                         <FaEye className="mr-2" />
