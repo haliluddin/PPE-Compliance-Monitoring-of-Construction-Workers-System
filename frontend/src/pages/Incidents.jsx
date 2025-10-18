@@ -1,3 +1,4 @@
+//frontend/src/pages/Incident.jsx
 import React, { useState, useEffect } from "react";
 import { FaEye } from "react-icons/fa";
 import { FiSearch, FiCalendar } from "react-icons/fi";
@@ -5,6 +6,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { format } from "date-fns";
 import { API_BASE } from "../config";   // <-- add/remove this line as needed
+import ViolationModal from "../components/ViolationModal";
 
 export default function Incident() {
   const [notifications, setNotifications] = useState([]);
@@ -18,10 +20,15 @@ export default function Incident() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(5);
 
+  const [showModal, setShowModal] = useState(false);
+const [selectedViolation, setSelectedViolation] = useState(null);
+const [updating, setUpdating] = useState(false);
+
+
   useEffect(() => {
     const token = localStorage.getItem("token");
-    //fetch("http://localhost:8000/violations/", {
-    fetch(`${API_BASE}/violations/`, {
+    fetch("http://localhost:8000/violations/", {
+    //fetch(`${API_BASE}/violations/`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -42,8 +49,8 @@ export default function Incident() {
 
 useEffect(() => {
   const token = localStorage.getItem("token");
-  //fetch("http://localhost:8000/cameras/", {
-  fetch(`${API_BASE}/cameras/`, {
+  fetch("http://localhost:8000/cameras/", {
+  //fetch(`${API_BASE}/cameras/`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -100,20 +107,58 @@ useEffect(() => {
     currentPage * itemsPerPage
   );
 
-  // Function to determine status badge color
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case "resolved":
-        return "bg-green-600 text-white";
-      case "reviewing":
-        return "bg-yellow-500 text-black";
-      case "rejected":
-        return "bg-red-600 text-white";
+        return "bg-green-500/20 text-green-400 border-green-600/50";
+      case "false positive":
+        return "bg-yellow-500/20 text-yellow-300 border-yellow-600/50";
       case "pending":
       default:
-        return "bg-gray-500 text-white";
+        return "bg-red-500/20 text-red-400 border-red-600/50";
     }
   };
+
+  // Handle open modal
+  const handleView = (violation) => {
+    setSelectedViolation(violation);
+    setShowModal(true);
+  };
+
+  const handleStatusChange = async (newStatus) => {
+  if (!selectedViolation) return;
+  setUpdating(true);
+  try {
+    const token = localStorage.getItem("token");
+
+    const res = await fetch(
+      `http://localhost:8000/violations/${selectedViolation.id}/status`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      }
+    );
+
+    if (!res.ok) throw new Error("Failed to update status");
+    const data = await res.json();
+
+    setNotifications((prev) =>
+      prev.map((v) =>
+        v.id === selectedViolation.id ? { ...v, status: data.status } : v
+      )
+    );
+    setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+  } catch (err) {
+    console.error("Error updating violation status:", err);
+  } finally {
+    setUpdating(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
@@ -257,7 +302,7 @@ useEffect(() => {
                 </span>
               </div>
               <div className="text-gray-300">
-                 {n.frame_ts ? new Date(n.frame_ts).toLocaleString("en-US", {
+                 {n.created_at ? new Date(n.created_at).toLocaleString("en-US", {
                 month: "short",
                 day: "numeric",
                 year: "numeric",
@@ -266,7 +311,10 @@ useEffect(() => {
               }) : "-"}
               </div>
               <div className="text-center">
-                <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
+                 <button
+                  onClick={() => handleView(n)}
+                  className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors"
+                >
                   <FaEye className="mr-2" /> View
                 </button>
               </div>
@@ -306,6 +354,43 @@ useEffect(() => {
           </button>
         </div>
       </section>
+
+      {/* Modal */}
+     {showModal && selectedViolation && (
+  <ViolationModal
+    violation={selectedViolation}
+    onClose={() => setShowModal(false)}
+    onStatusChange={async (newStatus) => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `http://localhost:8000/violations/${selectedViolation.id}/status`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ status: newStatus }),
+          }
+        );
+        if (!res.ok) throw new Error("Failed to update");
+        const data = await res.json();
+
+       
+        setNotifications((prev) =>
+          prev.map((v) =>
+            v.id === selectedViolation.id ? { ...v, status: data.status } : v
+          )
+        );
+        setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+      } catch (err) {
+        console.error("Error updating status:", err);
+      }
+    }}
+  />
+)}
+
     </div>
   );
 }

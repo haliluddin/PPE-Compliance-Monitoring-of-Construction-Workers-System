@@ -96,8 +96,9 @@ def get_worker_profile(
     violations = (
         db.query(
             Violation.id,
-            Violation.frame_ts,
+            Violation.created_at,
             Violation.violation_types,
+             Violation.status,
             Camera.name.label("camera_name"),
             Camera.location.label("camera_location")
         )
@@ -110,9 +111,11 @@ def get_worker_profile(
     violation_history = [
         {
             "id": v.id,
-            "date": v.frame_ts, 
+            "date": v.created_at, 
             "type": v.violation_types,
-            "cameraLocation": f"{v.camera_name or 'Unknown'} - {v.camera_location or 'N/A'}" 
+             "status": v.status,
+            "cameraLocation": f"{v.camera_name or 'Unknown'} - {v.camera_location or 'N/A'}",
+             "worker_name": worker.fullName,
         }
         for v in violations
     ]

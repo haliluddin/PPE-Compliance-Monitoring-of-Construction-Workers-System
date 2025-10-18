@@ -13,6 +13,7 @@ import Register from "./pages/Register";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { UnreadProvider } from "./context/UnreadContext";
 
+
 function App() {
   return (
     <Routes>
@@ -42,6 +43,7 @@ function App() {
                     <Route path="workers" element={<Workers />} />
                     <Route path="reports" element={<Reports />} />
                     <Route path="workersprofile/:id" element={<WorkersProfile />} />
+                  
                     <Route path="*" element={<Navigate to="camera" replace />} />
                   </Routes>
                 </div>

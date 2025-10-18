@@ -58,3 +58,6 @@ class ViolationResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+class StatusUpdate(BaseModel):
+    status: str

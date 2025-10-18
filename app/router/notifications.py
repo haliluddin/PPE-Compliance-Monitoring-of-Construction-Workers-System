@@ -33,6 +33,7 @@ def get_notifications(
     return [
         {
             "id": n.Notification.id,
+            "violation_id": n.Violation.id if n.Violation else None, 
             "message": n.Notification.message,
             "is_read": n.Notification.is_read,
             "created_at": n.Notification.created_at,
@@ -41,6 +42,7 @@ def get_notifications(
             "violation_type": getattr(n.Violation, "violation_types", "Unknown Violation"),
             "camera": getattr(n, "camera_name", None) or "Unknown Camera",
             "camera_location": getattr(n, "camera_location", None) or "Unknown Location",
+             "status": getattr(n.Violation, "status", "Pending"),
         }
         for n in notifications
     ]
