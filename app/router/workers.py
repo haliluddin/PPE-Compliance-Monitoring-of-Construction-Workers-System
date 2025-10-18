@@ -98,7 +98,6 @@ def get_worker_profile(
             Violation.id,
             Violation.frame_ts,
             Violation.violation_types,
-            Violation.worker_name,
              Violation.status,
             Camera.name.label("camera_name"),
             Camera.location.label("camera_location")
