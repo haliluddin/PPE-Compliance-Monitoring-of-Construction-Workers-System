@@ -301,7 +301,7 @@ const [selectedViolation, setSelectedViolation] = useState(null);
                     {n.type === "worker_violation" && <p className="text-gray-400 text-sm mt-1">{n.camera}</p>}
                     <div className="flex items-center gap-2 mt-1">
                       <p className="text-gray-300 text-sm">{n.violation}</p>
-                      {/* ✅ Status Badge */}
+                      {/* Status Badge */}
                         {n.status && (
                           <span
                             className={`inline-flex items-center mt-2 px-2.5 py-1 text-xs font-semibold rounded-full border

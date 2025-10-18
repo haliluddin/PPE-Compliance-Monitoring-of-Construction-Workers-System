@@ -5,7 +5,7 @@ from datetime import datetime
 # Configuration
 # -------------------------
 API_URL = "http://127.0.0.1:8000/"
-ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwiZW1haWwiOiJhcHJpbEBnbWFpbC5jb20iLCJleHAiOjE3NjA3ODAzNTJ9.DpSkx3IsomC-mZo7_C70VAlCES9Vi7XcOiILOr_PaQ0"
+ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwiZW1haWwiOiJhcHJpbEBnbWFpbC5jb20iLCJleHAiOjE3NjA3ODc3ODl9.HDxccZizoGvS6knqcXqNIAmSFxo_pmstsNBVIs3adIQ"
 headers = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {ACCESS_TOKEN}",  

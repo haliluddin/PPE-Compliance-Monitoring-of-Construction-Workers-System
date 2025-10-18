@@ -377,7 +377,7 @@ useEffect(() => {
         if (!res.ok) throw new Error("Failed to update");
         const data = await res.json();
 
-        // Update local state
+       
         setNotifications((prev) =>
           prev.map((v) =>
             v.id === selectedViolation.id ? { ...v, status: data.status } : v

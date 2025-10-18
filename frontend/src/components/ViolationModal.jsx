@@ -15,17 +15,17 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
 
   if (!violation) return null;
 
-  // Convert snapshot (binary base64) to usable image URL
+ 
   const snapshotUrl = violation.snapshot
     ? `data:image/jpeg;base64,${violation.snapshot}`
-    : "https://via.placeholder.com/400x250?text=No+Snapshot+Available"; // ✅ placeholder
+    : "https://via.placeholder.com/400x250?text=No+Snapshot+Available"; // placeholder
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
       <div className="bg-[#2A2B30] rounded-xl p-6 w-[420px] shadow-lg relative">
         <h2 className="text-lg font-semibold mb-4">Violation Details</h2>
 
-        {/* ✅ Snapshot Section */}
+      
         <div className="mb-4">
           <img
             src={snapshotUrl}
@@ -38,9 +38,14 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
         <p><strong>Camera:</strong> {violation.camera}</p>
         <p><strong>Violation:</strong> {violation.violation}</p>
         <p>
-          <strong>Date & Time:</strong>{" "}
-          {new Date(violation.frame_ts).toLocaleString()}
-        </p>
+            <strong>Date & Time:</strong>{" "}
+            {violation.created_at
+                ? new Date(violation.created_at).toLocaleString()
+                : violation.date && violation.time
+                ? `${violation.date} ${violation.time}`
+                : "N/A"}
+            </p>
+
 
         <div className="mt-4">
           <label className="block text-sm text-gray-400 mb-1">

@@ -35,8 +35,11 @@ def get_violations(
             "worker": v.fullName,
             "worker_code": v.Violation.worker_code,
             "camera": v.camera_name or v.camera_location,
-            "frame_ts": v.Violation.frame_ts,
+            "created_at": v.Violation.created_at, 
             "status": v.Violation.status,
+             "snapshot": (
+                    v.Violation.snapshot.decode("utf-8") if v.Violation.snapshot else None
+                ),  
         }
         for v in violations
     ]
