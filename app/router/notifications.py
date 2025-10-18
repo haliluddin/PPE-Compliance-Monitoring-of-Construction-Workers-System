@@ -33,6 +33,7 @@ def get_notifications(
     return [
         {
             "id": n.Notification.id,
+            "violation_id": n.Violation.id if n.Violation else None, 
             "message": n.Notification.message,
             "is_read": n.Notification.is_read,
             "created_at": n.Notification.created_at,

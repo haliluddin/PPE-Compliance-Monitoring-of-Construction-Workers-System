@@ -94,7 +94,6 @@ class Violation(Base):
     inference = Column(JSON)
     status = Column(String, nullable=False, server_default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    status = Column(String, nullable=False, server_default="pending")
 
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
