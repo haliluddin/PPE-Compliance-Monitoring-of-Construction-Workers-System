@@ -347,47 +347,58 @@ const [selectedViolation, setSelectedViolation] = useState(null);
       </section>
 
       {showModal && selectedViolation && (
-  <ViolationModal
-    violation={selectedViolation}
-    onClose={() => setShowModal(false)}
-    onStatusChange={async (newStatus) => {
-      try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(
-          `http://localhost:8000/violations/${selectedViolation.id}/status`,
-          {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ status: newStatus }),
-          }
-        );
-        if (!res.ok) throw new Error("Failed to update");
-        const data = await res.json();
+        <ViolationModal
+          violation={selectedViolation}
+          onClose={() => setShowModal(false)}
+          onStatusChange={async (newStatus) => {
+            try {
+              const token = localStorage.getItem("token");
 
-        // Update in Notifications list
-        setNotifications((prev) =>
-          prev.map((v) =>
-            v.id === selectedViolation.id ? { ...v, status: data.status } : v
-          )
-        );
+            
+              const res = await fetch(
+                `http://localhost:8000/violations/${selectedViolation.id}/status`,
+                {
+                  method: "PUT",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({ status: newStatus }),
+                }
+              );
+              if (!res.ok) throw new Error("Failed to update status");
+              const data = await res.json();
 
-        // Also update in Incidents via Broadcast (WebSocket or shared state)
-        const channel = new BroadcastChannel("violations_update");
-        channel.postMessage({
-          id: selectedViolation.id,
-          status: data.status,
-        });
+          
+              await API.post(`/notifications/${selectedViolation.id}/mark_read`);
 
-        setSelectedViolation((prev) => ({ ...prev, status: data.status }));
-      } catch (err) {
-        console.error("Error updating status:", err);
-      }
-    }}
-  />
-)}
+              
+              setNotifications((prev) =>
+                prev.map((v) =>
+                  v.id === selectedViolation.id
+                    ? { ...v, status: data.status, isNew: false }
+                    : v
+                )
+              );
+
+              const channel = new BroadcastChannel("violations_update");
+              channel.postMessage({
+                id: selectedViolation.id,
+                status: data.status,
+              });
+
+              
+              setSelectedViolation((prev) => ({
+                ...prev,
+                status: data.status,
+              }));
+            } catch (err) {
+              console.error("Error updating status or marking as read:", err);
+            }
+          }}
+        />
+      )}
+
 
     </div>
   );
