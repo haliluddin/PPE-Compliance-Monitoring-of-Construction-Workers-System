@@ -1,3 +1,4 @@
+//frontend/src/components/ViolationsModal.jsx
 import React, { useState } from "react";
 
 export default function ViolationModal({ violation, onClose, onStatusChange }) {
@@ -34,17 +35,14 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
           />
         </div>
 
-        <p><strong>Worker:</strong> {violation.worker}</p>
-        <p><strong>Camera:</strong> {violation.camera}</p>
-        <p><strong>Violation:</strong> {violation.violation}</p>
+       <p><strong>Worker:</strong> {violation.worker || violation.worker_name || 'N/A'}</p>
+        <p><strong>Camera:</strong> {violation.camera || violation.cameraLocation || 'N/A'}</p>
+        <p><strong>Violation:</strong> {violation.violation || violation.type || 'N/A'}</p>
         <p>
-            <strong>Date & Time:</strong>{" "}
-            {violation.created_at
-                ? new Date(violation.created_at).toLocaleString()
-                : violation.date && violation.time
-                ? `${violation.date} ${violation.time}`
-                : "N/A"}
-            </p>
+        <strong>Date & Time:</strong>{" "}
+        {violation.created_at || violation.date ? new Date(violation.created_at || violation.date).toLocaleString() : 'N/A'}
+        </p>
+
 
 
         <div className="mt-4">

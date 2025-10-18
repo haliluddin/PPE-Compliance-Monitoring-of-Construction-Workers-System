@@ -98,6 +98,7 @@ def get_worker_profile(
             Violation.id,
             Violation.frame_ts,
             Violation.violation_types,
+            Violation.worker_name,
              Violation.status,
             Camera.name.label("camera_name"),
             Camera.location.label("camera_location")
@@ -114,7 +115,8 @@ def get_worker_profile(
             "date": v.frame_ts, 
             "type": v.violation_types,
              "status": v.status,
-            "cameraLocation": f"{v.camera_name or 'Unknown'} - {v.camera_location or 'N/A'}" 
+            "cameraLocation": f"{v.camera_name or 'Unknown'} - {v.camera_location or 'N/A'}",
+             "worker_name": worker.fullName,
         }
         for v in violations
     ]
