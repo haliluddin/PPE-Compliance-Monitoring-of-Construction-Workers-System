@@ -61,6 +61,7 @@ const [selectedViolation, setSelectedViolation] = useState(null);
         time: n.time || new Date(n.created_at).toLocaleTimeString(),
         isNew: !n.is_read,
         resolved: n.resolved ?? false,
+         status: n.status || "Pending", 
       }));
       setNotifications(mapped);
     });
@@ -300,6 +301,21 @@ const [selectedViolation, setSelectedViolation] = useState(null);
                     {n.type === "worker_violation" && <p className="text-gray-400 text-sm mt-1">{n.camera}</p>}
                     <div className="flex items-center gap-2 mt-1">
                       <p className="text-gray-300 text-sm">{n.violation}</p>
+                      {n.status && (
+                        <p
+                          className={`text-xs mt-1 px-2 py-1 rounded-full w-fit
+                            ${
+                              n.status === "Resolved"
+                                ? "bg-green-600/20 text-green-400 border border-green-600/40"
+                                : n.status === "Reviewed"
+                                ? "bg-yellow-600/20 text-yellow-400 border border-yellow-600/40"
+                                : "bg-red-600/20 text-red-400 border border-red-600/40"
+                            }`}
+                        >
+                          {n.status}
+                        </p>
+                      )}
+
                       {n.type === "worker_violation" && <FaExclamationCircle className="text-red-500" size={14} />}
                     </div>
                     <p className="text-gray-500 text-xs mt-1">{n.date} - {n.time}</p>
