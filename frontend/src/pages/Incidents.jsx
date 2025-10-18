@@ -1,3 +1,4 @@
+//frontend/src/pages/Incident.jsx
 import React, { useState, useEffect } from "react";
 import { FaEye } from "react-icons/fa";
 import { FiSearch, FiCalendar } from "react-icons/fi";
@@ -17,6 +18,11 @@ export default function Incident() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(5);
+
+  const [showModal, setShowModal] = useState(false);
+const [selectedViolation, setSelectedViolation] = useState(null);
+const [updating, setUpdating] = useState(false);
+
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -42,8 +48,8 @@ export default function Incident() {
 
 useEffect(() => {
   const token = localStorage.getItem("token");
-  //fetch("http://localhost:8000/cameras/", {
-  fetch(`${API_BASE}/cameras/`, {
+  fetch("http://localhost:8000/cameras/", {
+  //fetch(`${API_BASE}/cameras/`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -100,20 +106,58 @@ useEffect(() => {
     currentPage * itemsPerPage
   );
 
-  // Function to determine status badge color
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case "resolved":
         return "bg-green-600 text-white";
-      case "reviewing":
-        return "bg-yellow-500 text-black";
-      case "rejected":
+      case "false positive":
         return "bg-red-600 text-white";
       case "pending":
       default:
         return "bg-gray-500 text-white";
     }
   };
+  
+  // Handle open modal
+  const handleView = (violation) => {
+    setSelectedViolation(violation);
+    setShowModal(true);
+  };
+
+  const handleStatusChange = async (newStatus) => {
+  if (!selectedViolation) return;
+  setUpdating(true);
+  try {
+    const token = localStorage.getItem("token");
+
+    const res = await fetch(
+      `http://localhost:8000/violations/${selectedViolation.id}/status`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      }
+    );
+
+    if (!res.ok) throw new Error("Failed to update status");
+    const data = await res.json();
+
+    setNotifications((prev) =>
+      prev.map((v) =>
+        v.id === selectedViolation.id ? { ...v, status: data.status } : v
+      )
+    );
+    setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+  } catch (err) {
+    console.error("Error updating violation status:", err);
+  } finally {
+    setUpdating(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
@@ -266,7 +310,10 @@ useEffect(() => {
               }) : "-"}
               </div>
               <div className="text-center">
-                <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
+                 <button
+                  onClick={() => handleView(n)}
+                  className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors"
+                >
                   <FaEye className="mr-2" /> View
                 </button>
               </div>
@@ -306,6 +353,52 @@ useEffect(() => {
           </button>
         </div>
       </section>
+
+      {/* Modal */}
+      {showModal && selectedViolation && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
+          <div className="bg-[#2A2B30] rounded-xl p-6 w-[400px] shadow-lg relative">
+            <h2 className="text-lg font-semibold mb-4">Violation Details</h2>
+
+            <p>
+              <strong>Worker:</strong> {selectedViolation.worker}
+            </p>
+            <p>
+              <strong>Camera:</strong> {selectedViolation.camera}
+            </p>
+            <p>
+              <strong>Violation:</strong> {selectedViolation.violation}
+            </p>
+            <p>
+              <strong>Date & Time:</strong>{" "}
+              {new Date(selectedViolation.frame_ts).toLocaleString()}
+            </p>
+
+            <div className="mt-4">
+              <label className="block text-sm text-gray-400 mb-1">
+                Update Status
+              </label>
+              <select
+                value={selectedViolation.status}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                disabled={updating}
+                className="w-full px-3 py-2 rounded-lg bg-[#1E1F23] border border-gray-600 text-gray-200 focus:ring-2 focus:ring-[#5388DF]"
+              >
+                <option value="pending">Pending</option>
+                <option value="resolved">Resolved</option>
+                <option value="false positive">False Positive</option>
+              </select>
+            </div>
+
+            <button
+              onClick={() => setShowModal(false)}
+              className="mt-6 bg-[#5388DF] hover:bg-[#19325C] text-white px-4 py-2 rounded-lg w-full"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

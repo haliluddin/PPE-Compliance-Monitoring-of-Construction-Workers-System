@@ -1,5 +1,5 @@
 # app/routers/violations.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Violation, Worker, User, Camera
@@ -10,6 +10,8 @@ from app.router.notifications_ws import connected_clients
 import json
 import asyncio
 from app.router.notifications_ws import connected_clients, broadcast_notification
+
+
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
 
@@ -97,3 +99,29 @@ def create_violation(
         asyncio.run(broadcast_notification(current_user.id, notification_data))
 
     return new_violation
+
+@router.put("/{violation_id}/status")
+def update_violation_status(
+    violation_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    violation = (
+        db.query(Violation)
+        .filter(Violation.id == violation_id, Violation.user_id == current_user.id)
+        .first()
+    )
+
+    if not violation:
+        raise HTTPException(status_code=404, detail="Violation not found")
+
+    new_status = payload.get("status")
+    if new_status not in ["pending", "resolved", "false positive"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    violation.status = new_status
+    db.commit()
+    db.refresh(violation)
+
+    return {"message": "Status updated", "status": violation.status}

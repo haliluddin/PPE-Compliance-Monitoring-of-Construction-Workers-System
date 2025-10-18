@@ -1,6 +1,6 @@
 // frontend/src/api.js
 import axios from "axios";
-import { API_BASE } from "./config"; //<-- add this
+//import { API_BASE } from "./config"; //<-- add this
 
 const API = axios.create({
 
