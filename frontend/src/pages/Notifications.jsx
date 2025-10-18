@@ -5,6 +5,8 @@ import { FaExclamationCircle } from "react-icons/fa";
 import { FiMoreVertical, FiSearch } from "react-icons/fi";
 import { LuBellRing } from "react-icons/lu";
 import { useUnread } from "../context/UnreadContext";
+import ViolationModal from "../components/ViolationModal";
+
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
@@ -12,6 +14,8 @@ export default function Notifications() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const { setUnreadCount } = useUnread();
+const [showModal, setShowModal] = useState(false);
+const [selectedViolation, setSelectedViolation] = useState(null);
 
   // Filters
   const cameraOptions = ["Camera 1", "Camera 2"];
@@ -302,7 +306,13 @@ export default function Notifications() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <button className="px-4 py-2 bg-[#5388DF] text-white rounded-lg text-sm hover:bg-[#19325C] transition">
+                    <button
+                      onClick={() => {
+                        setSelectedViolation(n);
+                        setShowModal(true);
+                      }}
+                      className="px-4 py-2 bg-[#5388DF] text-white rounded-lg text-sm hover:bg-[#19325C] transition"
+                    >
                       {n.type === "worker_violation" ? "View Footage" : "View Report"}
                     </button>
 
@@ -335,6 +345,50 @@ export default function Notifications() {
           )}
         </div>
       </section>
+
+      {showModal && selectedViolation && (
+  <ViolationModal
+    violation={selectedViolation}
+    onClose={() => setShowModal(false)}
+    onStatusChange={async (newStatus) => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `http://localhost:8000/violations/${selectedViolation.id}/status`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ status: newStatus }),
+          }
+        );
+        if (!res.ok) throw new Error("Failed to update");
+        const data = await res.json();
+
+        // Update in Notifications list
+        setNotifications((prev) =>
+          prev.map((v) =>
+            v.id === selectedViolation.id ? { ...v, status: data.status } : v
+          )
+        );
+
+        // Also update in Incidents via Broadcast (WebSocket or shared state)
+        const channel = new BroadcastChannel("violations_update");
+        channel.postMessage({
+          id: selectedViolation.id,
+          status: data.status,
+        });
+
+        setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+      } catch (err) {
+        console.error("Error updating status:", err);
+      }
+    }}
+  />
+)}
+
     </div>
   );
 }

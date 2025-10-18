@@ -6,6 +6,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { format } from "date-fns";
 import { API_BASE } from "../config";   // <-- add/remove this line as needed
+import ViolationModal from "../components/ViolationModal";
 
 export default function Incident() {
   const [notifications, setNotifications] = useState([]);
@@ -117,7 +118,7 @@ useEffect(() => {
         return "bg-gray-500 text-white";
     }
   };
-  
+
   // Handle open modal
   const handleView = (violation) => {
     setSelectedViolation(violation);
@@ -355,50 +356,41 @@ useEffect(() => {
       </section>
 
       {/* Modal */}
-      {showModal && selectedViolation && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
-          <div className="bg-[#2A2B30] rounded-xl p-6 w-[400px] shadow-lg relative">
-            <h2 className="text-lg font-semibold mb-4">Violation Details</h2>
+     {showModal && selectedViolation && (
+  <ViolationModal
+    violation={selectedViolation}
+    onClose={() => setShowModal(false)}
+    onStatusChange={async (newStatus) => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `http://localhost:8000/violations/${selectedViolation.id}/status`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ status: newStatus }),
+          }
+        );
+        if (!res.ok) throw new Error("Failed to update");
+        const data = await res.json();
 
-            <p>
-              <strong>Worker:</strong> {selectedViolation.worker}
-            </p>
-            <p>
-              <strong>Camera:</strong> {selectedViolation.camera}
-            </p>
-            <p>
-              <strong>Violation:</strong> {selectedViolation.violation}
-            </p>
-            <p>
-              <strong>Date & Time:</strong>{" "}
-              {new Date(selectedViolation.frame_ts).toLocaleString()}
-            </p>
+        // Update local state
+        setNotifications((prev) =>
+          prev.map((v) =>
+            v.id === selectedViolation.id ? { ...v, status: data.status } : v
+          )
+        );
+        setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+      } catch (err) {
+        console.error("Error updating status:", err);
+      }
+    }}
+  />
+)}
 
-            <div className="mt-4">
-              <label className="block text-sm text-gray-400 mb-1">
-                Update Status
-              </label>
-              <select
-                value={selectedViolation.status}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                disabled={updating}
-                className="w-full px-3 py-2 rounded-lg bg-[#1E1F23] border border-gray-600 text-gray-200 focus:ring-2 focus:ring-[#5388DF]"
-              >
-                <option value="pending">Pending</option>
-                <option value="resolved">Resolved</option>
-                <option value="false positive">False Positive</option>
-              </select>
-            </div>
-
-            <button
-              onClick={() => setShowModal(false)}
-              className="mt-6 bg-[#5388DF] hover:bg-[#19325C] text-white px-4 py-2 rounded-lg w-full"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
