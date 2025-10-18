@@ -308,7 +308,7 @@ const [selectedViolation, setSelectedViolation] = useState(null);
                               ${
                                 n.status.toLowerCase() === "resolved"
                                   ? "bg-green-500/20 text-green-400 border-green-600/50"
-                                  : n.status.toLowerCase() === "reviewed"
+                                  : n.status.toLowerCase() === "false positive"
                                   ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50"
                                   : n.status.toLowerCase() === "pending"
                                   ? "bg-red-500/20 text-red-400 border-red-600/50"

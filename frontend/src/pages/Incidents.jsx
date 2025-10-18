@@ -110,12 +110,12 @@ useEffect(() => {
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case "resolved":
-        return "bg-green-600 text-white";
+        return "bg-green-500/20 text-green-400 border-green-600/50";
       case "false positive":
-        return "bg-red-600 text-white";
+        return "bg-yellow-500/20 text-yellow-300 border-yellow-600/50";
       case "pending":
       default:
-        return "bg-gray-500 text-white";
+        return "bg-red-500/20 text-red-400 border-red-600/50";
     }
   };
 
@@ -302,7 +302,7 @@ useEffect(() => {
                 </span>
               </div>
               <div className="text-gray-300">
-                 {n.frame_ts ? new Date(n.frame_ts).toLocaleString("en-US", {
+                 {n.created_at ? new Date(n.created_at).toLocaleString("en-US", {
                 month: "short",
                 day: "numeric",
                 year: "numeric",
