@@ -20,8 +20,8 @@ export default function Incident() {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    //fetch("http://localhost:8000/violations/", {
-    fetch(`${API_BASE}/violations/`, {
+    fetch("http://localhost:8000/violations/", {
+    //fetch(`${API_BASE}/violations/`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
