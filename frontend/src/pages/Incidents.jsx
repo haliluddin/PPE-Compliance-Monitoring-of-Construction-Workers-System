@@ -15,15 +15,18 @@ export default function Incident() {
     violation: "",
     date: null,
     sortBy: "newest",
+    status: "",
   });
+
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(5);
 
   const [showModal, setShowModal] = useState(false);
-const [selectedViolation, setSelectedViolation] = useState(null);
-const [updating, setUpdating] = useState(false);
+  const [selectedViolation, setSelectedViolation] = useState(null);
+  const [updating, setUpdating] = useState(false);
 
+ const statusOptions = ["Pending", "Resolved", "False Positive"];
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -87,6 +90,8 @@ useEffect(() => {
       }
       if (filters.camera && n.camera !== filters.camera) return false;
       if (filters.violation && n.violation !== filters.violation) return false;
+      if (filters.status && n.status?.toLowerCase() !== filters.status.toLowerCase())
+        return false;
       if (filters.date) {
         const notificationDate = new Date(n.date.split(" ")[0]);
         const filterDate = new Date(filters.date);
@@ -244,8 +249,26 @@ useEffect(() => {
               <option value="oldest">Oldest</option>
             </select>
           </div>
-
+          {/* Status */}
           <div className="flex flex-col w-40">
+            <label className="font-medium text-sm mb-1 text-gray-400">
+              Status
+            </label>
+            <select
+              value={filters.status}
+              onChange={(e) => handleChange("status", e.target.value)}
+              className="px-3 py-3 border border-gray-700 rounded-lg bg-[#2A2B30] shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#5388DF] text-gray-200"
+            >
+              <option value="">All Status</option>
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* <div className="flex flex-col w-40">
             <label className="font-medium text-sm mb-1 text-gray-400">Date</label>
             <div className="relative">
               <DatePicker
@@ -257,7 +280,7 @@ useEffect(() => {
               />
               <FiCalendar className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
-          </div>
+          </div> */}
         </div>
       </section>
 
