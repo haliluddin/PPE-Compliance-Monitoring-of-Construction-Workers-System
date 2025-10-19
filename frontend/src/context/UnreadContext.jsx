@@ -3,7 +3,7 @@ import API from "../api";
 
 const UnreadContext = createContext();
 
-// ✅ Preload notification sound (used only for NEW violations)
+
 const audio = new Audio("/notification.mp3");
 audio.preload = "auto";
 
@@ -13,7 +13,7 @@ export function UnreadProvider({ children }) {
   const flashInterval = useRef(null);
   const originalTitle = useRef(document.title);
 
-  // ✅ Unlock audio after first user interaction
+
   useEffect(() => {
     const unlockAudio = () => {
       audio.play()
@@ -27,14 +27,14 @@ export function UnreadProvider({ children }) {
     window.addEventListener("click", unlockAudio, { once: true });
   }, []);
 
-  // ✅ Ask for browser notification permission once
+ 
   useEffect(() => {
     if (Notification.permission === "default") {
       Notification.requestPermission();
     }
   }, []);
 
-  // ✅ Load existing notifications
+
   useEffect(() => {
     API.get("/notifications")
       .then((res) => {
@@ -42,24 +42,24 @@ export function UnreadProvider({ children }) {
         const unread = res.data.filter((n) => !n.is_read).length;
         setUnreadCount(unread);
 
-        // Stop flashing if nothing unread
+ 
         if (unread === 0) stopFlashingTab(true);
       })
       .catch(console.error);
   }, []);
 
-  // ✅ WebSocket setup
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
 
     const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications?token=${token}`);
-    ws.onopen = () => console.log("✅ Connected to notification WebSocket");
+    ws.onopen = () => console.log("Connected to notification WebSocket");
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
-      // Silent status update
+   
       if (data.type === "status_update") {
         console.log("ℹ Status update received — silent refresh only.");
         setNotifications((prev) =>
@@ -70,12 +70,15 @@ export function UnreadProvider({ children }) {
         return;
       }
 
-      // New violation
+     
       if (data.type === "new_violation") {
-        console.log("🚨 New violation detected:", data);
+        console.log("violation detected:", data);
+
+
         audio.currentTime = 0;
         audio.play().catch(console.error);
 
+        
         if (Notification.permission === "granted") {
           new Notification("Violation Detected!", {
             body: `${data.worker_name || "Unknown Worker"} - ${
@@ -85,6 +88,7 @@ export function UnreadProvider({ children }) {
           });
         }
 
+      
         setUnreadCount((prev) => prev + 1);
         setNotifications((prev) => [
           {
@@ -102,6 +106,7 @@ export function UnreadProvider({ children }) {
           ...prev,
         ]);
 
+        
         startFlashingTab();
         return;
       }
@@ -109,7 +114,7 @@ export function UnreadProvider({ children }) {
       console.log("ℹ Ignored unknown event type:", data.type);
     };
 
-    ws.onclose = () => console.log("🔌 Notification WebSocket disconnected");
+    ws.onclose = () => console.log("Notification WebSocket disconnected");
 
     return () => {
       ws.close();
@@ -117,17 +122,17 @@ export function UnreadProvider({ children }) {
     };
   }, []);
 
-  // ✅ Flash tab title
+
   const startFlashingTab = () => {
-    stopFlashingTab(); // Clear any existing flash
+    stopFlashingTab(); // Prevent duplicates
     let flash = false;
     flashInterval.current = setInterval(() => {
-      document.title = flash ? "🚨 New Violation Detected!" : originalTitle.current;
+      document.title = flash ? ` (${unreadCount}) Violation Detected!` : originalTitle.current;
       flash = !flash;
     }, 1000);
   };
 
-  // ✅ Stop tab flashing (forceReset = true ensures title resets even if no active interval)
+
   const stopFlashingTab = (forceReset = false) => {
     if (flashInterval.current) {
       clearInterval(flashInterval.current);
@@ -138,17 +143,18 @@ export function UnreadProvider({ children }) {
     }
   };
 
-  // ✅ Stop flashing when tab regains focus
   useEffect(() => {
     const handleFocus = () => stopFlashingTab(true);
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
   }, []);
 
-  // ✅ NEW: Auto-stop flashing & reset title when all notifs read
+
   useEffect(() => {
-    if (unreadCount === 0) {
-      stopFlashingTab(true);
+    if (unreadCount > 0) {
+      startFlashingTab(); // Start if unread exists
+    } else {
+      stopFlashingTab(true); // Stop when all read
     }
   }, [unreadCount]);
 
