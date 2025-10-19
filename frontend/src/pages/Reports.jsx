@@ -1,27 +1,61 @@
-import React, { useState } from 'react';
-import { FiSearch, FiDownload, FiCheck } from 'react-icons/fi';
-import { HiOutlinePrinter } from 'react-icons/hi';
+//frontend/src/pages/Reports.jsx
+import React, { useState, useEffect } from "react";
+import API from "../api"; // your axios instance
+import { FiSearch, FiDownload, FiCheck } from "react-icons/fi";
+import { HiOutlinePrinter } from "react-icons/hi";
 import { FaMapMarkerAlt, FaUserAlt, FaChartLine } from 'react-icons/fa';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend, AreaChart, Area } from 'recharts';
 
 export default function Reports() {
-  const [selectedPeriod, setSelectedPeriod] = useState('Today');
 
-  // Sample data for Most Violations
-  const violationsData = [
-    { name: 'No Helmet', violators: 6 },
-    { name: 'No Vest', violators: 3 },
-    { name: 'No Gloves', violators: 2 },
-    { name: 'No Boots', violators: 1 },
-  ];
+  const [selectedPeriod, setSelectedPeriod] = useState("Today");
+  const [stats, setStats] = useState({
+    total_incidents: 0,
+    total_workers_involved: 0,
+    compliance_rate: 0,
+    high_risk_locations: 0,
+  });
+  const [violationsData, setViolationsData] = useState([]);
+  const [offendersData, setOffendersData] = useState([]);
 
-  // Sample data for Top Offenders
-  const offendersData = [
-    { name: 'Ayana Jade Alejo', value: 4, color: '#34D399' },
-    { name: 'Naila Haliluddin', value: 3, color: '#38BDF8'  },
-    { name: 'Athena Casino', value: 2, color: '#F472B6' },
-    { name: 'Alfaith Luzon', value: 1, color: '#FDE68A' },
-  ];
+  useEffect(() => {
+  const fetchReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const periodParam =
+        selectedPeriod === "Last Week"
+          ? "last_week"
+          : selectedPeriod === "Last Month"
+          ? "last_month"
+          : "today";
+
+      const response = await API.get(`/reports?period=${periodParam}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setStats({
+        total_incidents: response.data.total_incidents,
+        total_workers_involved: response.data.total_workers_involved,
+        compliance_rate: response.data.compliance_rate,
+        high_risk_locations: response.data.high_risk_locations,
+      });
+
+      setViolationsData(response.data.most_violations);
+      setOffendersData(
+        response.data.top_offenders.map((o, i) => ({
+          ...o,
+          color: ["#34D399", "#38BDF8", "#F472B6", "#FDE68A", "#F59E0B"][i % 5],
+        }))
+      );
+    } catch (err) {
+      console.error("Error fetching reports:", err);
+    }
+  };
+
+  fetchReports();
+}, [selectedPeriod]);
+
+ 
 
   // Sample data for Average Response Time
   const responseTimeData = [
@@ -73,6 +107,7 @@ export default function Reports() {
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
+    
       {/* Header */}
       <header className="bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg mb-8">
         <h1 className="text-2xl font-bold text-gray-100">REPORTS</h1>
@@ -133,33 +168,38 @@ export default function Reports() {
           </button>
         </div>
       </div>
-
+ {stats.total_incidents === 0 &&
+ stats.total_workers_involved === 0 &&
+ violationsData.length === 0 &&
+ offendersData.length === 0 ? (
+  <div className="text-center text-gray-400 text-sm my-6">
+    No data for {selectedPeriod}.
+  </div>
+) : (
+  <>
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        {/* Total Incidents Card */}
-        <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-          <h3 className="text-sm font-medium text-gray-400 mb-2">Total incidents</h3>
-          <p className="text-4xl font-bold text-[#5388DF]">10</p>
-        </div>
+<div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+  <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+    <h3 className="text-sm font-medium text-gray-400 mb-2">Total Incidents</h3>
+    <p className="text-4xl font-bold text-[#5388DF]">{stats.total_incidents}</p>
+  </div>
 
-        {/* Total Workers Involved Card */}
-        <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-          <h3 className="text-sm font-medium text-gray-400 mb-2">Total workers involved</h3>
-          <p className="text-4xl font-bold text-[#5388DF]">16</p>
-        </div>
+  <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+    <h3 className="text-sm font-medium text-gray-400 mb-2">Total Workers Involved</h3>
+    <p className="text-4xl font-bold text-[#5388DF]">{stats.total_workers_involved}</p>
+  </div>
 
-        {/* Overall Compliance Rate */}
-        <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-          <h3 className="text-sm font-medium text-gray-400 mb-2">Overall Compliance</h3>
-          <p className="text-4xl font-bold text-green-500">91%</p>
-        </div>
+  <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+    <h3 className="text-sm font-medium text-gray-400 mb-2">Overall Compliance</h3>
+    <p className="text-4xl font-bold text-green-500">{stats.compliance_rate}%</p>
+  </div>
 
-        {/* High Risk Locations */}
-        <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-          <h3 className="text-sm font-medium text-gray-400 mb-2">High Risk Locations</h3>
-          <p className="text-4xl font-bold text-red-500">2</p>
-        </div>
-      </div>
+  <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+    <h3 className="text-sm font-medium text-gray-400 mb-2">High Risk Locations</h3>
+    <p className="text-4xl font-bold text-red-500">{stats.high_risk_locations}</p>
+  </div>
+</div>
+
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -204,8 +244,7 @@ export default function Reports() {
 <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
   <h3 className="text-xl font-semibold text-gray-200 mb-6">Top Offenders</h3>
   <ResponsiveContainer width="100%" height={offendersData.length * 70 + 30}>
-    <BarChart 
-      data={[...offendersData].sort((a, b) => b.value - a.value)} 
+    <BarChart data={offendersData} 
       layout="vertical"
       margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
       barSize={40}
@@ -435,6 +474,10 @@ export default function Reports() {
           </LineChart>
         </ResponsiveContainer>
       </div>
+        </>
+)}
     </div>
+    
   );
+  
 }

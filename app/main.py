@@ -8,7 +8,7 @@ from app.router.workers import router as workers_router
 from app.router.violations import router as violations_router
 from app.router.notifications import router as notifications_router
 from app.router.notifications_ws import router as notifications_ws_router
-
+from app.router.reports import router as reports_router
 
 app = FastAPI()
 
@@ -32,4 +32,4 @@ app.include_router(workers_router)
 app.include_router(violations_router)
 app.include_router(notifications_router)
 app.include_router(notifications_ws_router)
-
+app.include_router(reports_router)
