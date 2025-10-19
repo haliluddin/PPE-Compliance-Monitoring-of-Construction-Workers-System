@@ -91,6 +91,34 @@ useEffect(() => {
   fetchPerformance();
 }, [selectedPeriod]);
 
+const handleExport = async () => {
+  try {
+    const token = localStorage.getItem("token");
+    const periodParam =
+      selectedPeriod === "Last Week"
+        ? "last_week"
+        : selectedPeriod === "Last Month"
+        ? "last_month"
+        : "today";
+
+    const res = await API.get(`/reports/export?period=${periodParam}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: "blob" 
+    });
+
+    // Create a downloadable link
+    const url = window.URL.createObjectURL(new Blob([res.data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `report_${periodParam}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+  } catch (err) {
+    console.error("Error exporting report:", err);
+  }
+};
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
@@ -111,10 +139,14 @@ useEffect(() => {
           />
         </div>
         
-        <button className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors">
+       <button
+          onClick={handleExport}
+          className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors"
+        >
           <FiDownload className="w-4 h-4" />
           Export
         </button>
+
         
         <button className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors">
           <HiOutlinePrinter className="w-4 h-4" />
@@ -376,17 +408,17 @@ useEffect(() => {
           <FaChartLine className="text-[#5388DF]" />
           <h3 className="text-xl font-semibold text-gray-200">Performance Over Time</h3>
         </div>
-<ResponsiveContainer width="100%" height={300}>
-  <AreaChart data={performanceData}>
-    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-    <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
-    <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
-    <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
-    <Legend wrapperStyle={{ paddingTop: '10px' }} />
-    <Area type="monotone" dataKey="violations" stroke="#EF4444" fill="#EF4444" fillOpacity={0.6} />
-    <Area type="monotone" dataKey="compliance" stroke="#10B981" fill="#10B981" fillOpacity={0.6} />
-  </AreaChart>
-</ResponsiveContainer>
+        <ResponsiveContainer width="100%" height={300}>
+          <AreaChart data={performanceData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+            <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+            <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
+            <Legend wrapperStyle={{ paddingTop: '10px' }} />
+            <Area type="monotone" dataKey="violations" stroke="#EF4444" fill="#EF4444" fillOpacity={0.6} />
+            <Area type="monotone" dataKey="compliance" stroke="#10B981" fill="#10B981" fillOpacity={0.6} />
+          </AreaChart>
+        </ResponsiveContainer>
 
       </div>
 
@@ -394,21 +426,21 @@ useEffect(() => {
       <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
         <h3 className="text-xl font-semibold text-gray-200 mb-4">Average Response Time (min)</h3>
         <div className="text-4xl font-bold text-[#5388DF] mb-4">
-  {avgResponseTime} min
-</div>
-<ResponsiveContainer width="100%" height={250}>
-  <LineChart data={performanceData.map(p => ({ date: p.date, time: p.violations } ))}>
-    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-    <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
-    <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
-    <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
-    <Line type="monotone" dataKey="time" stroke="#5388DF" strokeWidth={2} dot={{ r: 6 }} activeDot={{ r: 8 }} />
-  </LineChart>
-</ResponsiveContainer>
+          {avgResponseTime} min
+        </div>
+        <ResponsiveContainer width="100%" height={250}>
+          <LineChart data={performanceData.map(p => ({ date: p.date, time: p.violations } ))}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+            <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+            <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
+            <Line type="monotone" dataKey="time" stroke="#5388DF" strokeWidth={2} dot={{ r: 6 }} activeDot={{ r: 8 }} />
+          </LineChart>
+        </ResponsiveContainer>
 
-      </div>
-        </>
-)}
+              </div>
+                </>
+        )}
     </div>
     
   );

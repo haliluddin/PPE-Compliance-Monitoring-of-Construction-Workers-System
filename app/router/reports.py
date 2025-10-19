@@ -6,6 +6,9 @@ from app.database import get_db
 from app.models import Violation, Worker, Camera
 from app.router.auth import get_current_user
 from datetime import timezone
+import csv
+from fastapi.responses import StreamingResponse
+from io import StringIO
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -205,3 +208,52 @@ def get_performance_data(
         "performance_over_time": performance_data,
         "average_response_time": avg_response
     }
+
+
+
+@router.get("/export")
+def export_reports(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    period: str = Query("today", description="Period filter: today | last_week | last_month")
+):
+    user_id = current_user.id
+    now = datetime.now(timezone(timedelta(hours=8)))
+
+    if period == "last_week":
+        end_date = datetime(now.year, now.month, now.day)
+        start_date = end_date - timedelta(days=7)
+    elif period == "last_month":
+        end_date = datetime(now.year, now.month, now.day)
+        start_date = end_date - timedelta(days=30)
+    else:
+        start_date = datetime(now.year, now.month, now.day)
+        end_date = start_date + timedelta(days=1)
+
+    date_filter = and_(Violation.created_at >= start_date, Violation.created_at < end_date, Violation.user_id == user_id)
+
+    violations = db.query(
+        Violation.id,
+        Violation.violation_types,
+        Violation.created_at,
+        Worker.fullName.label("worker_name"),
+        Camera.name.label("camera_location")
+    ).join(Worker, Worker.id == Violation.worker_id)\
+     .join(Camera, Camera.id == Violation.camera_id)\
+     .filter(date_filter)\
+     .order_by(Violation.created_at.desc())\
+     .all()
+
+    # Prepare CSV
+    csv_file = StringIO()
+    writer = csv.writer(csv_file)
+    writer.writerow(["ID", "Violation Type", "Date", "Worker Name", "Camera Location"])
+    for v in violations:
+        writer.writerow([v.id, v.violation_types, v.created_at, v.worker_name, v.camera_location])
+
+    csv_file.seek(0)
+    return StreamingResponse(
+        csv_file,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=report_{period}.csv"}
+    )
