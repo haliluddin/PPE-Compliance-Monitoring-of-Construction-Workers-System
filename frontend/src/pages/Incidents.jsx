@@ -70,7 +70,7 @@ useEffect(() => {
     "No Helmet",
     "No Vest",
     "No Gloves",
-    "No Safety Shoes",
+    "No Boots",
   ];
 
   const filteredNotifications = notifications

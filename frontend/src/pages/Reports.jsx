@@ -103,14 +103,23 @@ const handleExport = async () => {
 
     const res = await API.get(`/reports/export?period=${periodParam}`, {
       headers: { Authorization: `Bearer ${token}` },
-      responseType: "blob" 
+      responseType: "blob"
     });
 
-    // Create a downloadable link
+    // Generate filename with current date on the frontend
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const dateStr = `${yyyy}${mm}${dd}`; // e.g., 20251019
+
+    const filename = `report_${periodParam}_${dateStr}.csv`;
+
+    // Create downloadable link
     const url = window.URL.createObjectURL(new Blob([res.data]));
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `report_${periodParam}.csv`);
+    link.setAttribute("download", filename);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -119,6 +128,8 @@ const handleExport = async () => {
     console.error("Error exporting report:", err);
   }
 };
+
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">

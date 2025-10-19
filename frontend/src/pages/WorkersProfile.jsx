@@ -142,7 +142,11 @@ const exportToPDF = () => {
   yPos += 20;
   doc.text(`Status: ${workerData.status}`, margin, yPos);
   yPos += 20;
-  doc.text(`Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`, margin, yPos);
+  doc.text(
+    `Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`,
+    margin,
+    yPos
+  );
   yPos += 20;
   doc.text(`Total Violations: ${workerData.totalViolations}`, margin, yPos);
   yPos += 20;
@@ -179,7 +183,6 @@ const exportToPDF = () => {
     },
     margin: { left: margin, right: margin },
     didDrawPage: (data) => {
-      // Optional: Add page number at bottom
       const pageCount = doc.getNumberOfPages();
       doc.setFontSize(10);
       doc.setTextColor(120);
@@ -187,8 +190,15 @@ const exportToPDF = () => {
     },
   });
 
-  doc.save(`Worker_${workerData.worker_code}_Report.pdf`);
+  // Generate filename using worker's name and current date
+  const safeName = workerData.fullName.replace(/[^a-z0-9]/gi, '_'); // replace spaces/special chars
+  const today = new Date();
+  const dateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const fileName = `${safeName}_${dateString}_Report.pdf`;
+
+  doc.save(fileName);
 };
+
 
 
 

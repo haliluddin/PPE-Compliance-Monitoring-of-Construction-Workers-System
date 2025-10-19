@@ -91,11 +91,17 @@ def get_reports_summary(
             Camera.name.label("location"),
             func.count(Violation.id).label("violations")
         )
-        .outerjoin(Violation, Camera.id == Violation.camera_id)
+        .outerjoin(Violation, and_(
+            Camera.id == Violation.camera_id,
+            Violation.user_id == user_id,
+            Violation.created_at >= start_date,
+            Violation.created_at < end_date
+        ))
         .filter(Camera.user_id == user_id)
         .group_by(Camera.id)
         .all()
     )
+
 
     camera_data = []
     for c in camera_stats:
@@ -119,12 +125,15 @@ def get_reports_summary(
         )
         .outerjoin(Violation, and_(
             Worker.id == Violation.worker_id,
-            date_filter
+            Violation.created_at >= start_date,
+            Violation.created_at < end_date
         ))
         .filter(Worker.user_id == user_id)
         .group_by(Worker.id)
         .all()
     )
+
+
 
     worker_data = []
     for rank, w in enumerate(sorted(worker_stats, key=lambda x: x.violations)):
@@ -252,8 +261,13 @@ def export_reports(
         writer.writerow([v.id, v.violation_types, v.created_at, v.worker_name, v.camera_location])
 
     csv_file.seek(0)
+
+    # Generate filename with current date
+    date_str = now.strftime("%Y%m%d")  # e.g., 20251019
+    filename = f"report_{period}_{date_str}.csv"
+
     return StreamingResponse(
         csv_file,
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=report_{period}.csv"}
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
