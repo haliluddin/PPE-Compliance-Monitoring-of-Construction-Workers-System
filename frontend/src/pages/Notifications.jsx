@@ -412,7 +412,7 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
                       {n.type === "worker_violation" ? "View Footage" : "View Report"}
                     </button>
 
-                    <div className="relative">
+                    {/* <div className="relative">
                       <button
                         onClick={() => toggleMenu(n.id)}
                         className="p-2 rounded-full hover:bg-gray-700 transition-colors text-gray-400 hover:text-white"
@@ -436,7 +436,7 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
                           ))}
                         </div>
                       )}
-                    </div>
+                    </div> */}
                   </div>
                 </div>
               </div>
