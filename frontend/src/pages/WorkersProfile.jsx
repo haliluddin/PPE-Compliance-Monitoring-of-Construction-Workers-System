@@ -6,6 +6,8 @@ import { FaEye } from "react-icons/fa";
 import { useParams, useNavigate } from 'react-router-dom';
 import API from "../api";
 import ViolationModal from "../components/ViolationModal";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 
 export default function WorkersProfile() {
@@ -119,6 +121,44 @@ const handleStatusChange = async (newStatus) => {
   }
 };
 
+
+const exportToPDF = () => {
+  if (!workerData) return;
+
+  const doc = new jsPDF();
+
+  // Title
+  doc.setFontSize(16);
+  doc.text(`Worker Report: ${workerData.fullName}`, 14, 20);
+
+  // Worker info
+  doc.setFontSize(12);
+  doc.text(`Worker Code: ${workerData.worker_code}`, 14, 30);
+  doc.text(`Status: ${workerData.status}`, 14, 36);
+  doc.text(`Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`, 14, 42);
+  doc.text(`Total Violations: ${workerData.totalViolations}`, 14, 48);
+  doc.text(`Compliance Rate: ${workerData.complianceRate}%`, 14, 54);
+
+  // Violation table
+  const tableColumn = ["Date & Time", "Violation Type", "Camera Location", "Status"];
+  const tableRows = workerData.violationHistory.map(v => [
+    new Date(v.date).toLocaleString(),
+    v.type,
+    v.cameraLocation,
+    v.status
+  ]);
+
+  autoTable(doc, {
+    head: [tableColumn],
+    body: tableRows,
+    startY: 64,
+    theme: 'grid',
+    headStyles: { fillColor: [25, 50, 92], textColor: [255, 255, 255] },
+    styles: { fontSize: 10 }
+  });
+
+  doc.save(`Worker_${workerData.worker_code}_Report.pdf`);
+};
 
 
   return (
@@ -381,7 +421,7 @@ const handleStatusChange = async (newStatus) => {
                         <option value="No Helmet">No Helmet</option>
                         <option value="No Vest">No Vest</option>
                         <option value="No Gloves">No Gloves</option>
-                        <option value="No Safety Shoes">No Boots</option>
+                        <option value="No Boots">No Boots</option>
                       </select>
                     </div>
 
@@ -405,7 +445,7 @@ const handleStatusChange = async (newStatus) => {
             <div className="flex space-x-2">
               <button 
                 className="px-3 py-3 text-xs font-medium text-white bg-blue rounded-md hover:bg-[#5388DF] transition-colors"
-                onClick={() => alert('Export to PDF')}
+                onClick={exportToPDF}  // <- call the function here
               >
                 Export to PDF
               </button>
