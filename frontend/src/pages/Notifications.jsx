@@ -165,7 +165,7 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
               worker_code: data.worker_code || "N/A",
               violation: data.violation_type || data.message || "Unknown Violation",
               camera: `${data.camera || "Unknown Camera"} (${data.camera_location || "Unknown Location"})`,
-              type: data.type || "worker_violation",
+              type:"worker_violation",
               date: new Date(data.created_at).toLocaleDateString(),
               time: new Date(data.created_at).toLocaleTimeString(),
               isNew: true,
