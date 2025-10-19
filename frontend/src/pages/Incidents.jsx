@@ -93,18 +93,18 @@ useEffect(() => {
       if (filters.status && n.status?.toLowerCase() !== filters.status.toLowerCase())
         return false;
       if (filters.date) {
-        const notificationDate = new Date(n.date.split(" ")[0]);
-        const filterDate = new Date(filters.date);
-        if (notificationDate.toDateString() !== filterDate.toDateString())
-          return false;
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      const dateA = new Date(a.date);
-      const dateB = new Date(b.date);
-      return filters.sortBy === "newest" ? dateB - dateA : dateA - dateB;
-    });
+      const notificationDate = new Date(n.created_at);
+      const filterDate = new Date(filters.date);
+      if (notificationDate.toDateString() !== filterDate.toDateString())
+        return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.created_at);
+        const dateB = new Date(b.created_at);
+        return filters.sortBy === "newest" ? dateB - dateA : dateA - dateB;
+      });
 
   const totalPages = Math.ceil(filteredNotifications.length / itemsPerPage);
   const currentItems = filteredNotifications.slice(
