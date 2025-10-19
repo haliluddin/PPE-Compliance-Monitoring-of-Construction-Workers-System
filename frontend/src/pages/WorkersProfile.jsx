@@ -17,9 +17,10 @@ const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
   const [workerData, setWorkerData] = useState(null);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [selectedType, setSelectedType] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+const [sortBy, setSortBy] = useState('Newest'); 
+const [statusFilter, setStatusFilter] = useState('All'); 
 
 
   // Fetch worker profile
@@ -49,23 +50,28 @@ const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
 
   // Filter violations
   const filterViolations = () => {
-    if (!workerData?.violationHistory) return [];
-    return workerData.violationHistory.filter(violation => {
-      const violationDate = new Date(violation.date);
-      const startDate = dateRange.start ? new Date(dateRange.start) : null;
-      const endDate = dateRange.end ? new Date(dateRange.end + 'T23:59:59') : null;
+  if (!workerData?.violationHistory) return [];
 
-      const matchesDate = (!startDate || violationDate >= startDate) &&
-                          (!endDate || violationDate <= endDate);
-      const matchesType = selectedType === 'All' || violation.type === selectedType;
-      const matchesSearch = !searchQuery ||
-        Object.values(violation).some(
-          val => String(val).toLowerCase().includes(searchQuery.toLowerCase())
-        );
+  let filtered = workerData.violationHistory.filter(violation => {
+    const matchesType = selectedType === 'All' || violation.type === selectedType;
+    const matchesStatus = statusFilter === 'All' || violation.status === statusFilter.toLowerCase();
+    const matchesSearch = !searchQuery ||
+      Object.values(violation).some(
+        val => String(val).toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
-      return matchesDate && matchesType && matchesSearch;
-    });
-  };
+    return matchesType && matchesStatus && matchesSearch;
+  });
+
+  // Sort
+  filtered.sort((a, b) => {
+    if (sortBy === 'Newest') return new Date(b.date) - new Date(a.date);
+    if (sortBy === 'Oldest') return new Date(a.date) - new Date(b.date);
+    return 0;
+  });
+
+  return filtered;
+};
 
   // Close filter dropdown on click outside
   useEffect(() => {
@@ -188,14 +194,14 @@ const handleStatusChange = async (newStatus) => {
           {isDetailsExpanded && (
             <div className="mt-6 pt-6 border-t border-gray-700">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-1">
+                {/* <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Worker Role</p>
                   <p className="text-white font-medium">{workerData.role || 'Not specified'}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Assigned Location</p>
                   <p className="text-white font-medium">{workerData.assignedLocation || 'Not assigned'}</p>
-                </div>
+                </div> */}
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Date Added</p>
                   <p className="text-white font-medium">
@@ -334,23 +340,33 @@ const handleStatusChange = async (newStatus) => {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="space-y-4">
-                    {/* Date Range */}
+
+                    {/* Sort By */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-1">Date Range</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="date"
-                          value={dateRange.start}
-                          onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
-                          className="bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
-                        />
-                        <input
-                          type="date"
-                          value={dateRange.end}
-                          onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
-                          className="bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
-                        />
-                      </div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Sort By</label>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
+                      >
+                        <option value="Newest">Newest</option>
+                        <option value="Oldest">Oldest</option>
+                      </select>
+                    </div>
+
+                    {/* Status Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
+                      <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
+                      >
+                        <option value="All">All</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="pending">Pending</option>
+                        <option value="false positive">False Positive</option>
+                      </select>
                     </div>
 
                     {/* Violation Type */}
@@ -365,14 +381,15 @@ const handleStatusChange = async (newStatus) => {
                         <option value="No Helmet">No Helmet</option>
                         <option value="No Vest">No Vest</option>
                         <option value="No Gloves">No Gloves</option>
-                        <option value="No Safety Shoes">No Safety Shoes</option>
+                        <option value="No Safety Shoes">No Boots</option>
                       </select>
                     </div>
 
                     {/* Clear Filters */}
                     <button
                       onClick={() => {
-                        setDateRange({ start: '', end: '' });
+                        setSortBy('Newest');
+                        setStatusFilter('All');
                         setSelectedType('All');
                         setShowFilter(false);
                       }}
@@ -383,6 +400,7 @@ const handleStatusChange = async (newStatus) => {
                   </div>
                 </div>
               )}
+
             </div>
             <div className="flex space-x-2">
               <button 
