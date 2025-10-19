@@ -190,9 +190,10 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
     return () => ws.close();
   }, [audio, selectedViolation]);
 
-  
+  // Toggle notification menu
   const toggleMenu = (id) => setOpenMenu(openMenu === id ? null : id);
 
+  // Mark notification as read
   const markAsRead = async (id) => {
     try {
       await API.post(`/notifications/${id}/mark_read`);
@@ -210,35 +211,30 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
     { label: "Report Issue", onClick: (id) => alert(`Report issue for ${id}`) },
   ];
 
-
-    const filteredNotifications = notifications
+  // Filter and sort notifications
+  const filteredNotifications = notifications
     .filter((n) => {
-  
       if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const matchesSearch =
-          (n.worker && n.worker.toLowerCase().includes(query)) ||
-          (n.violation && n.violation.toLowerCase().includes(query)) ||
-          (n.camera && n.camera.toLowerCase().includes(query));
-        if (!matchesSearch) return false;
-      }
-
+      const query = searchQuery.toLowerCase();
+      const matchesSearch =
+        (n.worker && n.worker.toLowerCase().includes(query)) ||
+        (n.violation && n.violation.toLowerCase().includes(query)) ||
+        (n.camera && n.camera.toLowerCase().includes(query));
+      if (!matchesSearch) return false;
+    }
       if (filters.camera && n.camera_name !== filters.camera) return false;
-
-      if (filters.violation && n.violation_type !== filters.violation) return false;
-
+      if (filters.violation && n.violation !== filters.violation) return false;
       if (filter === "unread" && !n.isNew) return false;
-
       return true;
     })
     .sort((a, b) => {
-    
+      if (a.isNew && !b.isNew) return -1;
+      if (!a.isNew && b.isNew) return 1;
       if (filters.sortBy === "Oldest") {
         return new Date(a.date + " " + a.time) - new Date(b.date + " " + b.time);
       }
       return new Date(b.date + " " + b.time) - new Date(a.date + " " + a.time);
     });
-
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-8">
