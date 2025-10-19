@@ -22,7 +22,26 @@ export default function Notifications() {
 
 
   // Filters
-  const cameraOptions = ["Camera 1", "Camera 2"];
+  const [cameraOptions, setCameraOptions] = useState([]);
+    useEffect(() => {
+      const fetchCameras = async () => {
+        try {
+          const token = localStorage.getItem("token");
+          const res = await fetch("http://localhost:8000/cameras/", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          if (!res.ok) throw new Error("Failed to fetch cameras");
+          const data = await res.json();
+          setCameraOptions(data.map((c) => c.name)); // Use camera names for the filter
+        } catch (err) {
+          console.error(err);
+        }
+      };
+      fetchCameras();
+    }, []);
+
   const violationOptions = ["No Helmet", "No Vest", "No Boots", "No Gloves"];
   const sortOptions = ["Newest", "Oldest"];
   const [filters, setFilters] = useState({ camera: "", violation: "", sortBy: "Newest" });
@@ -65,6 +84,7 @@ export default function Notifications() {
         worker_code: n.worker_code || "N/A",
         violation: n.violation_type || n.message || "Unknown Violation",
         camera: `${n.camera || "Unknown Camera"} (${n.camera_location || "Unknown Location"})`,
+        camera_name: n.camera || "Unknown Camera",
         type: n.type || "worker_violation",
         date: n.date || new Date(n.created_at).toLocaleDateString(),
         time: n.time || new Date(n.created_at).toLocaleTimeString(),
@@ -170,10 +190,9 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
     return () => ws.close();
   }, [audio, selectedViolation]);
 
-  // Toggle notification menu
+  
   const toggleMenu = (id) => setOpenMenu(openMenu === id ? null : id);
 
-  // Mark notification as read
   const markAsRead = async (id) => {
     try {
       await API.post(`/notifications/${id}/mark_read`);
@@ -191,31 +210,35 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
     { label: "Report Issue", onClick: (id) => alert(`Report issue for ${id}`) },
   ];
 
-  // Filter and sort notifications
-  const filteredNotifications = notifications
+
+    const filteredNotifications = notifications
     .filter((n) => {
-      if (
-        searchQuery &&
-        !(
-          (n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
-        )
-      )
-        return false;
-      if (filters.camera && n.camera !== filters.camera) return false;
-      if (filters.violation && n.violation !== filters.violation) return false;
+  
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesSearch =
+          (n.worker && n.worker.toLowerCase().includes(query)) ||
+          (n.violation && n.violation.toLowerCase().includes(query)) ||
+          (n.camera && n.camera.toLowerCase().includes(query));
+        if (!matchesSearch) return false;
+      }
+
+      if (filters.camera && n.camera_name !== filters.camera) return false;
+
+      if (filters.violation && n.violation_type !== filters.violation) return false;
+
       if (filter === "unread" && !n.isNew) return false;
+
       return true;
     })
     .sort((a, b) => {
-      if (a.isNew && !b.isNew) return -1;
-      if (!a.isNew && b.isNew) return 1;
+    
       if (filters.sortBy === "Oldest") {
         return new Date(a.date + " " + a.time) - new Date(b.date + " " + b.time);
       }
       return new Date(b.date + " " + b.time) - new Date(a.date + " " + a.time);
     });
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-8">
@@ -266,6 +289,7 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
                   </option>
                 ))}
               </select>
+
             </div>
 
             <div className="flex flex-col w-48">
