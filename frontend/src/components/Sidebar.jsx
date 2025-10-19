@@ -27,9 +27,19 @@ export default function Sidebar() {
     const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications?token=${token}`);
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setUnreadCount((prev) => prev + 1); // increment unread count
-    };
+  const data = JSON.parse(event.data);
+
+  // Only trigger dot if it's a NEW violation
+  if (data.type === "new_violation") {
+    setUnreadCount((prev) => prev + 1);
+  }
+
+  // Ignore status updates
+  if (data.type === "status_update") {
+    console.log("✅ Status updated, no new notification triggered");
+  }
+};
+
 
     ws.onclose = () => console.log("❌ Notification WS disconnected");
 

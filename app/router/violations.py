@@ -85,6 +85,7 @@ def create_violation(
     camera = db.query(Camera).filter(Camera.id == new_violation.camera_id).first()
 
     notification_data = {
+         "type": "new_violation",
         "id": new_notification.id,
         "violation_id": new_violation.id, 
         "message": message,
@@ -136,6 +137,7 @@ async def update_violation_status(
 
     # Prepare WebSocket notification
     notification_data = {
+        "type": "status_update",
         "violation_id": violation.id,
         "status": violation.status,
         "worker_code": violation.worker_code,
