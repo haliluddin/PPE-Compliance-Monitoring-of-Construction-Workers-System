@@ -63,53 +63,34 @@ setWorkerData(response.data.worker_data || []);
 const [cameraData, setCameraData] = useState([]);
 const [workerData, setWorkerData] = useState([]);
 
-  // Sample data for Average Response Time
-  const responseTimeData = [
-    { date: 'Dec 14', time: 10 },
-    { date: 'Dec 15', time: 20 },
-    { date: 'Dec 16', time: 30 },
-    { date: 'Dec 17', time: 20 },
-    { date: 'Dec 18', time: 30 },
-    { date: 'Dec 19', time: 10 },
-    { date: 'Dec 20', time: 40 },
-  ];
+const [performanceData, setPerformanceData] = useState([]);
+const [avgResponseTime, setAvgResponseTime] = useState(0);
 
-  // New data for Trends Over Time
-  const trendsData = [
-    { month: 'Jan', violations: 12, compliance: 88 },
-    { month: 'Feb', violations: 8, compliance: 92 },
-    { month: 'Mar', violations: 15, compliance: 85 },
-    { month: 'Apr', violations: 10, compliance: 90 },
-    { month: 'May', violations: 6, compliance: 94 },
-    { month: 'Jun', violations: 9, compliance: 91 },
-  ];
+useEffect(() => {
+  const fetchPerformance = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const periodParam =
+        selectedPeriod === "Last Week"
+          ? "last_week"
+          : selectedPeriod === "Last Month"
+          ? "last_month"
+          : "today";
 
-  // Location-based hotspots data
-  const locationData = [
-    { location: 'Camera 1 - Entrance', violations: 25, risk: 'High' },
-    { location: 'Camera 2 - Equipment Area', violations: 18, risk: 'Medium' },
-    { location: 'Camera 3 - Storage', violations: 12, risk: 'Medium' },
-    { location: 'Camera 4 - Ground Floor', violations: 5, risk: 'Low' },
-    { location: 'Camera 5 - 3rd Floor', violations: 5, risk: 'Low' },
-    { location: 'Camera 6 - Rooftop', violations: 5, risk: 'Low' },
-  ];
+      const res = await API.get(`/reports/performance?period=${periodParam}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-  // PPE Compliance data
-    const complianceData = [
-      { item: 'Helmet', compliant: 30, violation: 70 },        
-      { item: 'Vest', compliant: 65, violation: 35 },   
-      { item: 'Gloves', compliant: 85, violation: 15 },        
-      { item: 'Safety Shoes', compliant: 95, violation: 5 },  
-    ];
+      setPerformanceData(res.data.performance_over_time || []);
+      setAvgResponseTime(res.data.average_response_time || 0);
+    } catch (err) {
+      console.error("Error fetching performance data:", err);
+    }
+  };
 
-  // Worker Rankings
-  const workerRankings = [
-    { rank: 1, name: 'Maria Santos', violations: 0, compliance: 100 },
-    { rank: 2, name: 'Pedro Garcia', violations: 1, compliance: 98 },
-    { rank: 3, name: 'Ana Cruz', violations: 2, compliance: 95 },
-    { rank: 4, name: 'Juan Dela Cruz', violations: 3, compliance: 92 },
-    { rank: 5, name: 'Carlos Reyes', violations: 5, compliance: 88 },
-  ];
+  fetchPerformance();
+}, [selectedPeriod]);
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
@@ -395,90 +376,36 @@ const [workerData, setWorkerData] = useState([]);
           <FaChartLine className="text-[#5388DF]" />
           <h3 className="text-xl font-semibold text-gray-200">Performance Over Time</h3>
         </div>
-        <ResponsiveContainer width="100%" height={300}>
-          <AreaChart data={trendsData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis 
-              dataKey="month" 
-              tick={{ fontSize: 12, fill: '#9CA3AF' }}
-              stroke="#9CA3AF"
-              axisLine={false}
-            />
-            <YAxis 
-              tick={{ fontSize: 12, fill: '#9CA3AF' }}
-              stroke="#9CA3AF"
-              axisLine={false}
-            />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: '#1E1F23', 
-                border: '1px solid #374151',
-                borderRadius: '0.5rem',
-                color: '#E5E7EB'
-              }}
-            />
-            <Legend 
-              wrapperStyle={{ paddingTop: '10px' }}
-              formatter={(value) => (
-                <span style={{ color: '#9CA3AF', fontSize: '12px' }}>
-                  {value === 'violations' ? 'Violations' : 'Compliance %'}
-                </span>
-              )}
-            />
-            <Area 
-              type="monotone" 
-              dataKey="violations" 
-              stroke="#EF4444" 
-              fill="#EF4444" 
-              fillOpacity={0.6}
-            />
-            <Area 
-              type="monotone" 
-              dataKey="compliance" 
-              stroke="#10B981" 
-              fill="#10B981" 
-              fillOpacity={0.6}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+<ResponsiveContainer width="100%" height={300}>
+  <AreaChart data={performanceData}>
+    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+    <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+    <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+    <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
+    <Legend wrapperStyle={{ paddingTop: '10px' }} />
+    <Area type="monotone" dataKey="violations" stroke="#EF4444" fill="#EF4444" fillOpacity={0.6} />
+    <Area type="monotone" dataKey="compliance" stroke="#10B981" fill="#10B981" fillOpacity={0.6} />
+  </AreaChart>
+</ResponsiveContainer>
+
       </div>
 
       {/* Average Response Time Chart */}
       <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
         <h3 className="text-xl font-semibold text-gray-200 mb-4">Average Response Time (min)</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={responseTimeData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis 
-              dataKey="date" 
-              tick={{ fontSize: 12, fill: '#9CA3AF' }}
-              stroke="#9CA3AF"
-              axisLine={false}
-            />
-            <YAxis 
-              tick={{ fontSize: 12, fill: '#9CA3AF' }}
-              stroke="#9CA3AF"
-              axisLine={false}
-              ticks={[0, 10, 20, 30, 40]}
-            />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: '#1E1F23', 
-                border: '1px solid #374151',
-                borderRadius: '0.5rem',
-                color: '#E5E7EB'
-              }}
-            />
-            <Line 
-              type="monotone" 
-              dataKey="time" 
-              stroke="#5388DF" 
-              strokeWidth={2}
-              dot={{ fill: '#5388DF', r: 6 }}
-              activeDot={{ r: 8 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <div className="text-4xl font-bold text-[#5388DF] mb-4">
+  {avgResponseTime} min
+</div>
+<ResponsiveContainer width="100%" height={250}>
+  <LineChart data={performanceData.map(p => ({ date: p.date, time: p.violations } ))}>
+    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+    <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+    <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+    <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
+    <Line type="monotone" dataKey="time" stroke="#5388DF" strokeWidth={2} dot={{ r: 6 }} activeDot={{ r: 8 }} />
+  </LineChart>
+</ResponsiveContainer>
+
       </div>
         </>
 )}

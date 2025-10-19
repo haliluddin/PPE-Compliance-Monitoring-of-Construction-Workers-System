@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from app.database import get_db
 from app.models import Violation, Worker, Camera
 from app.router.auth import get_current_user
+from datetime import timezone
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -142,4 +143,65 @@ def get_reports_summary(
         "top_offenders": [{"name": w[0], "value": w[1]} for w in top_offenders],
         "camera_data": camera_data,
         "worker_data": worker_data
+    }
+
+@router.get("/performance")
+def get_performance_data(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    period: str = Query("today", description="Period filter: today | last_week | last_month")
+):
+    user_id = current_user.id
+    now = datetime.now(timezone(timedelta(hours=8)))
+
+    # Define date range
+    if period == "last_week":
+        end_date = datetime(now.year, now.month, now.day)
+        start_date = end_date - timedelta(days=7)
+    elif period == "last_month":
+        end_date = datetime(now.year, now.month, now.day)
+        start_date = end_date - timedelta(days=30)
+    else:
+        start_date = datetime(now.year, now.month, now.day)
+        end_date = start_date + timedelta(days=1)
+
+    date_filter = and_(Violation.created_at >= start_date, Violation.created_at < end_date, Violation.user_id == user_id)
+
+    # --- Performance Over Time (daily counts) ---
+    from sqlalchemy import cast, Date
+
+    daily_stats = (
+        db.query(
+            cast(Violation.created_at, Date).label("date"),
+            func.count(Violation.id).label("violations")
+        )
+        .filter(date_filter)
+        .group_by(cast(Violation.created_at, Date))
+        .order_by(cast(Violation.created_at, Date))
+        .all()
+    )
+
+    performance_data = []
+    for day in daily_stats:
+        # Approximate compliance % = 100 - violations per day * factor
+        compliance = max(0, 100 - day.violations * 5)
+        performance_data.append({
+            "date": day.date.strftime("%b %d"),  # e.g., "Oct 19"
+            "violations": day.violations,
+            "compliance": compliance
+        })
+
+    # --- Average Response Time (in minutes) ---
+    # Response time = difference between frame_ts and created_at (violation detection delay)
+    response_times = (
+        db.query(func.avg(func.extract('epoch', Violation.created_at - Violation.frame_ts)/60))
+        .filter(date_filter, Violation.frame_ts.isnot(None))
+        .scalar()
+    )
+    
+    avg_response = round(response_times or 0, 2)  # in minutes
+
+    return {
+        "performance_over_time": performance_data,
+        "average_response_time": avg_response
     }
