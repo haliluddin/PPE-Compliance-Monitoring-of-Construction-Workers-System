@@ -21,6 +21,7 @@ export default function Reports() {
   useEffect(() => {
   const fetchReports = async () => {
     try {
+
       const token = localStorage.getItem("token");
       const periodParam =
         selectedPeriod === "Last Week"
@@ -32,6 +33,9 @@ export default function Reports() {
       const response = await API.get(`/reports?period=${periodParam}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+
+ setCameraData(response.data.camera_data || []);
+setWorkerData(response.data.worker_data || []);
 
       setStats({
         total_incidents: response.data.total_incidents,
@@ -56,6 +60,8 @@ export default function Reports() {
 }, [selectedPeriod]);
 
  
+const [cameraData, setCameraData] = useState([]);
+const [workerData, setWorkerData] = useState([]);
 
   // Sample data for Average Response Time
   const responseTimeData = [
@@ -321,7 +327,7 @@ export default function Reports() {
             <h3 className="text-xl font-semibold text-gray-200">Camera Location</h3>
           </div>
           <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
-            {locationData.map((location, index) => (
+            {cameraData.map((location, index) => (
               <div 
                 key={index}
                 className="bg-[#1E1F23] rounded-lg p-4 border border-gray-700 hover:bg-[#3A3B40] transition-colors"
@@ -351,7 +357,7 @@ export default function Reports() {
             <h3 className="text-xl font-semibold text-gray-200">Worker Compliance Score</h3>
           </div>
                   <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
-            {workerRankings.map((worker) => (
+            {workerData.map((worker) => (
               <div 
                 key={worker.rank}
                 className="bg-[#1E1F23] rounded-lg p-4 border border-gray-700 hover:bg-[#3A3B40] transition-colors"
