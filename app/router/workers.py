@@ -24,8 +24,8 @@ def get_workers(
             Worker.id,
             Worker.fullName,
             Worker.worker_code,
-            Worker.assignedLocation,
-            Worker.role,
+            # Worker.assignedLocation,
+            # Worker.role,
             Worker.dateAdded,
             Worker.status,
             Worker.registered,
@@ -45,8 +45,8 @@ def get_workers(
             "id": w.id,
             "fullName": w.fullName,
             "worker_code": w.worker_code,
-            "assignedLocation": w.assignedLocation,
-            "role": w.role,
+            # "assignedLocation": w.assignedLocation,
+            # "role": w.role,
             "dateAdded": w.dateAdded,
             "status": w.status,
             "registered": w.registered,
@@ -67,6 +67,19 @@ def add_worker(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Check if worker_code already exists for the current user
+    existing_worker = db.query(Worker).filter(
+        Worker.worker_code == worker.worker_code,
+        Worker.user_id == current_user.id
+    ).first()
+
+    if existing_worker:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Worker code '{worker.worker_code}' already exists."
+        )
+
+    # Create new worker
     new_worker = Worker(**worker.dict(), user_id=current_user.id)
     db.add(new_worker)
     db.commit()
@@ -124,8 +137,8 @@ def get_worker_profile(
         "id": worker.id,
         "fullName": worker.fullName,
         "worker_code": worker.worker_code,
-        "assignedLocation": worker.assignedLocation,
-        "role": worker.role,
+        # "assignedLocation": worker.assignedLocation,
+        # "role": worker.role,
         "dateAdded": worker.dateAdded,
         "status": worker.status,
         "registered": worker.registered,
