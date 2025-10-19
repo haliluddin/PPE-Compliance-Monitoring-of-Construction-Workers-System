@@ -121,44 +121,75 @@ const handleStatusChange = async (newStatus) => {
   }
 };
 
-
 const exportToPDF = () => {
   if (!workerData) return;
 
-  const doc = new jsPDF();
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const margin = 40;
+  let yPos = 40;
 
   // Title
-  doc.setFontSize(16);
-  doc.text(`Worker Report: ${workerData.fullName}`, 14, 20);
+  doc.setFontSize(18);
+  doc.setTextColor(33, 33, 33);
+  doc.text(`Worker Report`, margin, yPos);
+  yPos += 25;
 
-  // Worker info
-  doc.setFontSize(12);
-  doc.text(`Worker Code: ${workerData.worker_code}`, 14, 30);
-  doc.text(`Status: ${workerData.status}`, 14, 36);
-  doc.text(`Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`, 14, 42);
-  doc.text(`Total Violations: ${workerData.totalViolations}`, 14, 48);
-  doc.text(`Compliance Rate: ${workerData.complianceRate}%`, 14, 54);
+  doc.setFontSize(14);
+  doc.setTextColor(55, 55, 55);
+  doc.text(`Name: ${workerData.fullName}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Worker Code: ${workerData.worker_code}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Status: ${workerData.status}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Total Violations: ${workerData.totalViolations}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Compliance Rate: ${workerData.complianceRate}%`, margin, yPos);
+  yPos += 30;
 
-  // Violation table
+  // Section Separator
+  doc.setDrawColor(200, 200, 200);
+  doc.setLineWidth(0.5);
+  doc.line(margin, yPos, 555, yPos);
+  yPos += 15;
+
+  // Violation Table
   const tableColumn = ["Date & Time", "Violation Type", "Camera Location", "Status"];
   const tableRows = workerData.violationHistory.map(v => [
     new Date(v.date).toLocaleString(),
     v.type,
     v.cameraLocation,
-    v.status
+    v.status.charAt(0).toUpperCase() + v.status.slice(1)
   ]);
 
   autoTable(doc, {
     head: [tableColumn],
     body: tableRows,
-    startY: 64,
+    startY: yPos,
     theme: 'grid',
-    headStyles: { fillColor: [25, 50, 92], textColor: [255, 255, 255] },
-    styles: { fontSize: 10 }
+    headStyles: { fillColor: [25, 50, 92], textColor: [255, 255, 255], fontSize: 11 },
+    styles: { fontSize: 10, cellPadding: 5 },
+    columnStyles: {
+      0: { cellWidth: 110 },
+      1: { cellWidth: 110 },
+      2: { cellWidth: 150 },
+      3: { cellWidth: 80 },
+    },
+    margin: { left: margin, right: margin },
+    didDrawPage: (data) => {
+      // Optional: Add page number at bottom
+      const pageCount = doc.getNumberOfPages();
+      doc.setFontSize(10);
+      doc.setTextColor(120);
+      doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`, 555, 820, { align: "right" });
+    },
   });
 
   doc.save(`Worker_${workerData.worker_code}_Report.pdf`);
 };
+
 
 
   return (
