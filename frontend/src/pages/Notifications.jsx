@@ -5,6 +5,7 @@ import { FaExclamationCircle } from "react-icons/fa";
 import { FiMoreVertical, FiSearch } from "react-icons/fi";
 import { LuBellRing } from "react-icons/lu";
 import { useUnread } from "../context/UnreadContext";
+import { WS_BASE } from "../config";
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
@@ -94,8 +95,11 @@ export default function Notifications() {
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
-
-    const ws = new WebSocket(`ws://127.0.0.1:9000/ws/notifications?token=${token}`);
+    
+    // build ws url — make sure it ends with "/ws/notifications"
+    const wsBaseClean = (WS_BASE || window.location.origin.replace(/^http/, "ws")).replace(/\/+$/, "");
+    const wsUrl = `${wsBaseClean}/ws/notifications?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => console.log("Connected to notification WebSocket");
 

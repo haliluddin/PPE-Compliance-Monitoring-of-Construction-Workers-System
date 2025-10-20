@@ -1,12 +1,9 @@
 // frontend/src/api.js
 import axios from "axios";
-import { API_BASE } from "./config"; //<-- add this
+import { API_BASE } from "./config";
 
 const API = axios.create({
-
-  //baseURL: "http://localhost:8000",
-  baseURL: API_BASE,
-
+  baseURL: API_BASE || undefined, // undefined means "relative" requests go to same origin
 });
 
 API.interceptors.request.use((req) => {
@@ -16,6 +13,5 @@ API.interceptors.request.use((req) => {
   }
   return req;
 });
-
 
 export default API;

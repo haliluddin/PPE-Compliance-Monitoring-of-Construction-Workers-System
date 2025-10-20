@@ -1,10 +1,10 @@
 // frontend/src/components/Sidebar.jsx
-
 import { useEffect, useState } from "react";
 import API from "../api";
 import { NavLink, useNavigate } from "react-router-dom";
 import { FiCamera, FiBell, FiAlertTriangle, FiUsers, FiFileText, FiMenu, FiLogOut } from "react-icons/fi";
 import { useUnread } from "../context/UnreadContext";
+import { WS_BASE } from "../config";
 
 export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -23,8 +23,10 @@ export default function Sidebar() {
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
-
-    const ws = new WebSocket(`ws://127.0.0.1:9000/ws/notifications?token=${token}`);
+    
+    const wsBaseClean = (WS_BASE || window.location.origin.replace(/^http/, "ws")).replace(/\/+$/, "");
+    const wsUrl = `${wsBaseClean}/ws/notifications?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
