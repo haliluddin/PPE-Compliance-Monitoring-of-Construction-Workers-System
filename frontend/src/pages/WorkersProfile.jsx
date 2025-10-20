@@ -5,17 +5,25 @@ import { format, parseISO } from 'date-fns';
 import { FaEye } from "react-icons/fa";
 import { useParams, useNavigate } from 'react-router-dom';
 import API from "../api";
+import ViolationModal from "../components/ViolationModal";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
 
 export default function WorkersProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [selectedViolation, setSelectedViolation] = useState(null);
+const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
 
   const [workerData, setWorkerData] = useState(null);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [selectedType, setSelectedType] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+const [sortBy, setSortBy] = useState('Newest'); 
+const [statusFilter, setStatusFilter] = useState('All'); 
+
 
   // Fetch worker profile
   useEffect(() => {
@@ -44,23 +52,28 @@ export default function WorkersProfile() {
 
   // Filter violations
   const filterViolations = () => {
-    if (!workerData?.violationHistory) return [];
-    return workerData.violationHistory.filter(violation => {
-      const violationDate = new Date(violation.date);
-      const startDate = dateRange.start ? new Date(dateRange.start) : null;
-      const endDate = dateRange.end ? new Date(dateRange.end + 'T23:59:59') : null;
+  if (!workerData?.violationHistory) return [];
 
-      const matchesDate = (!startDate || violationDate >= startDate) &&
-                          (!endDate || violationDate <= endDate);
-      const matchesType = selectedType === 'All' || violation.type === selectedType;
-      const matchesSearch = !searchQuery ||
-        Object.values(violation).some(
-          val => String(val).toLowerCase().includes(searchQuery.toLowerCase())
-        );
+  let filtered = workerData.violationHistory.filter(violation => {
+    const matchesType = selectedType === 'All' || violation.type === selectedType;
+    const matchesStatus = statusFilter === 'All' || violation.status === statusFilter.toLowerCase();
+    const matchesSearch = !searchQuery ||
+      Object.values(violation).some(
+        val => String(val).toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
-      return matchesDate && matchesType && matchesSearch;
-    });
-  };
+    return matchesType && matchesStatus && matchesSearch;
+  });
+
+  // Sort
+  filtered.sort((a, b) => {
+    if (sortBy === 'Newest') return new Date(b.date) - new Date(a.date);
+    if (sortBy === 'Oldest') return new Date(a.date) - new Date(b.date);
+    return 0;
+  });
+
+  return filtered;
+};
 
   // Close filter dropdown on click outside
   useEffect(() => {
@@ -80,6 +93,114 @@ export default function WorkersProfile() {
       </div>
     );
   }
+
+ const openViolationModal = (violation) => {
+  setSelectedViolation(violation);
+  setIsViolationModalOpen(true);
+};
+
+const closeViolationModal = () => {
+  setSelectedViolation(null);
+  setIsViolationModalOpen(false);
+};
+
+const handleStatusChange = async (newStatus) => {
+  if (!selectedViolation) return;
+
+  try {
+    await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+    setWorkerData((prev) => ({
+      ...prev,
+      violationHistory: prev.violationHistory.map((v) =>
+        v.id === selectedViolation.id ? { ...v, status: newStatus } : v
+      ),
+    }));
+    setSelectedViolation((prev) => ({ ...prev, status: newStatus }));
+  } catch (error) {
+    console.error("Failed to update status:", error);
+  }
+};
+
+const exportToPDF = () => {
+  if (!workerData) return;
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const margin = 40;
+  let yPos = 40;
+
+  // Title
+  doc.setFontSize(18);
+  doc.setTextColor(33, 33, 33);
+  doc.text(`Worker Report`, margin, yPos);
+  yPos += 25;
+
+  doc.setFontSize(14);
+  doc.setTextColor(55, 55, 55);
+  doc.text(`Name: ${workerData.fullName}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Worker Code: ${workerData.worker_code}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Status: ${workerData.status}`, margin, yPos);
+  yPos += 20;
+  doc.text(
+    `Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`,
+    margin,
+    yPos
+  );
+  yPos += 20;
+  doc.text(`Total Violations: ${workerData.totalViolations}`, margin, yPos);
+  yPos += 20;
+  doc.text(`Compliance Rate: ${workerData.complianceRate}%`, margin, yPos);
+  yPos += 30;
+
+  // Section Separator
+  doc.setDrawColor(200, 200, 200);
+  doc.setLineWidth(0.5);
+  doc.line(margin, yPos, 555, yPos);
+  yPos += 15;
+
+  // Violation Table
+  const tableColumn = ["Date & Time", "Violation Type", "Camera Location", "Status"];
+  const tableRows = workerData.violationHistory.map(v => [
+    new Date(v.date).toLocaleString(),
+    v.type,
+    v.cameraLocation,
+    v.status.charAt(0).toUpperCase() + v.status.slice(1)
+  ]);
+
+  autoTable(doc, {
+    head: [tableColumn],
+    body: tableRows,
+    startY: yPos,
+    theme: 'grid',
+    headStyles: { fillColor: [25, 50, 92], textColor: [255, 255, 255], fontSize: 11 },
+    styles: { fontSize: 10, cellPadding: 5 },
+    columnStyles: {
+      0: { cellWidth: 110 },
+      1: { cellWidth: 110 },
+      2: { cellWidth: 150 },
+      3: { cellWidth: 80 },
+    },
+    margin: { left: margin, right: margin },
+    didDrawPage: (data) => {
+      const pageCount = doc.getNumberOfPages();
+      doc.setFontSize(10);
+      doc.setTextColor(120);
+      doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`, 555, 820, { align: "right" });
+    },
+  });
+
+  // Generate filename using worker's name and current date
+  const safeName = workerData.fullName.replace(/[^a-z0-9]/gi, '_'); // replace spaces/special chars
+  const today = new Date();
+  const dateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const fileName = `${safeName}_${dateString}_Report.pdf`;
+
+  doc.save(fileName);
+};
+
+
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
@@ -154,14 +275,14 @@ export default function WorkersProfile() {
           {isDetailsExpanded && (
             <div className="mt-6 pt-6 border-t border-gray-700">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-1">
+                {/* <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Worker Role</p>
                   <p className="text-white font-medium">{workerData.role || 'Not specified'}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Assigned Location</p>
                   <p className="text-white font-medium">{workerData.assignedLocation || 'Not assigned'}</p>
-                </div>
+                </div> */}
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Date Added</p>
                   <p className="text-white font-medium">
@@ -300,23 +421,33 @@ export default function WorkersProfile() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="space-y-4">
-                    {/* Date Range */}
+
+                    {/* Sort By */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-1">Date Range</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="date"
-                          value={dateRange.start}
-                          onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
-                          className="bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
-                        />
-                        <input
-                          type="date"
-                          value={dateRange.end}
-                          onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
-                          className="bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
-                        />
-                      </div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Sort By</label>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
+                      >
+                        <option value="Newest">Newest</option>
+                        <option value="Oldest">Oldest</option>
+                      </select>
+                    </div>
+
+                    {/* Status Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
+                      <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
+                      >
+                        <option value="All">All</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="pending">Pending</option>
+                        <option value="false positive">False Positive</option>
+                      </select>
                     </div>
 
                     {/* Violation Type */}
@@ -331,14 +462,15 @@ export default function WorkersProfile() {
                         <option value="No Helmet">No Helmet</option>
                         <option value="No Vest">No Vest</option>
                         <option value="No Gloves">No Gloves</option>
-                        <option value="No Safety Shoes">No Safety Shoes</option>
+                        <option value="No Boots">No Boots</option>
                       </select>
                     </div>
 
                     {/* Clear Filters */}
                     <button
                       onClick={() => {
-                        setDateRange({ start: '', end: '' });
+                        setSortBy('Newest');
+                        setStatusFilter('All');
                         setSelectedType('All');
                         setShowFilter(false);
                       }}
@@ -349,11 +481,12 @@ export default function WorkersProfile() {
                   </div>
                 </div>
               )}
+
             </div>
             <div className="flex space-x-2">
               <button 
                 className="px-3 py-3 text-xs font-medium text-white bg-blue rounded-md hover:bg-[#5388DF] transition-colors"
-                onClick={() => alert('Export to PDF')}
+                onClick={exportToPDF}  // <- call the function here
               >
                 Export to PDF
               </button>
@@ -365,28 +498,49 @@ export default function WorkersProfile() {
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead>
-              <tr className="grid grid-cols-4 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
+              <tr className="grid grid-cols-5 gap-4 mb-4 text-xs md:text-sm font-semibold text-white">
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Date & Time</th>
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Violation Type</th>
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Camera Location</th>
+                <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Status</th>
                 <th className="bg-[#19325C] px-4 py-2 rounded-lg text-left">Action</th>
               </tr>
             </thead>
+
             <tbody className="space-y-2">
               {filterViolations().length > 0 ? (
                 filterViolations().map((violation, index) => (
                   <tr 
                     key={index} 
-                    className="grid grid-cols-4 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
+                    className="grid grid-cols-5 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
                   >
                     <td className="text-gray-300">{format(parseISO(violation.date), 'MMM d, yyyy hh:mm a')}</td>
                     <td className="text-gray-300">{violation.type}</td>
                    <td className="text-gray-300">{violation.cameraLocation}</td>
+                   <td>
+                    <span
+                      className={`px-3 py-1 text-xs font-medium rounded-full border ${
+                        violation.status === "resolved"
+                          ? "bg-green-500/20 text-green-400 border-green-600/50"
+                          : violation.status === "pending"
+                          ? "bg-red-500/20 text-red-400 border-red-600/50"
+                          : violation.status === "false positive"
+                          ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50"
+                          : "bg-blue-900/30 text-blue-300 border-gray-700"
+                      }`}
+                    >
+                      {violation.status || "Pending"}
+                    </span>
+                  </td>
                     <td className="text-gray-300">
-                      <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
-                        <FaEye className="mr-2" />
-                        View
-                      </button>
+                    <button
+                      onClick={() => openViolationModal(violation)}
+                      className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors"
+                    >
+                      <FaEye className="mr-2" />
+                      View
+                    </button>
+
                     </td>
                   </tr>
                 ))
@@ -401,6 +555,28 @@ export default function WorkersProfile() {
           </table>
         </div>
       </div>
+      {isViolationModalOpen && selectedViolation && (
+  <ViolationModal
+    violation={selectedViolation}
+    onClose={closeViolationModal}
+    onStatusChange={async (newStatus) => {
+      try {
+        await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+        setWorkerData(prev => {
+          const updatedHistory = prev.violationHistory.map(v =>
+            v.id === selectedViolation.id ? { ...v, status: newStatus } : v
+          );
+          return { ...prev, violationHistory: updatedHistory };
+        });
+        setSelectedViolation(prev => ({ ...prev, status: newStatus }));
+      } catch (error) {
+        console.error("Failed to update status:", error);
+      }
+    }}
+  />
+)}
+
+
     </div>
   );
 }

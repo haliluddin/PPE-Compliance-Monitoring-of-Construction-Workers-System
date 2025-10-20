@@ -19,8 +19,8 @@ class UserOut(BaseModel):
 class WorkerCreate(BaseModel):
     fullName: str
     worker_code: str
-    assignedLocation: str
-    role: str
+    # assignedLocation: str
+    # role: str
     dateAdded: date
     status: str
     registered: bool = False  
@@ -29,8 +29,8 @@ class WorkerResponse(BaseModel):
     id: int
     fullName: str
     worker_code: str
-    assignedLocation: str
-    role: str
+    # assignedLocation: str
+    # role: str
     dateAdded: date
     status: str
     registered: bool 
@@ -58,3 +58,6 @@ class ViolationResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+class StatusUpdate(BaseModel):
+    status: str

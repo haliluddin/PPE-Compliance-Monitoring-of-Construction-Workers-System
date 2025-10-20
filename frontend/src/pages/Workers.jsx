@@ -13,8 +13,8 @@ export default function Workers() {
   const [newWorker, setNewWorker] = useState({
     fullName: "",
     worker_code: "",
-    assignedLocation: "",
-    role: "",
+    // assignedLocation: "",
+    // role: "",
     dateAdded: new Date().toISOString().split("T")[0],
     status: "Active",
   });
@@ -39,26 +39,42 @@ export default function Workers() {
     setNewWorker((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Add new worker
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await API.post("/workers", newWorker);
-      setWorkers((prev) => [...prev, res.data]);
-      setNewWorker({
-        fullName: "",
-        worker_code: "",
-        assignedLocation: "",
-        role: "",
-        dateAdded: new Date().toISOString().split("T")[0],
-        status: "Active",
-      });
-      setIsAddWorkerModalOpen(false);
-    } catch (error) {
-      console.error("Failed to add worker:", error);
-      alert(error.response?.data?.detail || "Failed to add worker");
-    }
-  };
+  e.preventDefault();
+
+  // Basic client-side validation
+  if (!newWorker.fullName || !newWorker.worker_code) {
+    alert("Full Name and Worker Code are required.");
+    return;
+  }
+
+  try {
+const isDuplicateCode = workers.some(
+  (w) => w.worker_code === newWorker.worker_code
+);
+
+if (isDuplicateCode) {
+  alert("Worker code already exists!");
+  return;
+}
+
+    const res = await API.post("/workers", newWorker);
+
+    setWorkers((prev) => [...prev, res.data]);
+    setNewWorker({
+      fullName: "",
+      worker_code: "",
+      dateAdded: new Date().toISOString().split("T")[0],
+      status: "Active",
+    });
+    setIsAddWorkerModalOpen(false);
+  } catch (error) {
+    // Show error from backend (e.g., duplicate worker_code)
+    alert(error.response?.data?.detail || "Failed to add worker");
+  }
+};
+
+
 
   // Filter & Pagination
   const filtered = workers.filter(
@@ -152,7 +168,7 @@ export default function Workers() {
                       required
                     />
                   </div>
-                  <div className="space-y-1">
+                  {/* <div className="space-y-1">
                     <label className="block text-sm font-medium text-gray-300">Assigned Location</label>
                     <input
                       type="text"
@@ -163,12 +179,12 @@ export default function Workers() {
                       className="w-full px-4 py-2.5 bg-[#2A2B30] border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
                       required
                     />
-                  </div>
+                  </div> */}
                 </div>
 
                 {/* Work Info */}
                 <div className="space-y-5">
-                  <div className="space-y-1">
+                  {/* <div className="space-y-1">
                     <label className="block text-sm font-medium text-gray-300">Role</label>
                     <select
                       name="role"
@@ -186,7 +202,7 @@ export default function Workers() {
                       <option value="Laborer">Laborer</option>
                       <option value="Foreman">Foreman</option>
                     </select>
-                  </div>
+                  </div> */}
                   <div className="space-y-1">
                     <label className="block text-sm font-medium text-gray-300">Date Added</label>
                     <input

@@ -45,8 +45,8 @@ class Worker(Base):
     id = Column(Integer, primary_key=True, index=True)
     fullName = Column(String, nullable=False)
     worker_code = Column(String, nullable=False)
-    assignedLocation = Column(String, nullable=False)
-    role = Column(String, nullable=False)
+    # assignedLocation = Column(String, nullable=False)
+    # role = Column(String, nullable=False)
     dateAdded = Column(Date, nullable=False)
     status = Column(String, nullable=False)
     registered = Column(Boolean, default=False)
@@ -93,7 +93,6 @@ class Violation(Base):
     inference = Column(JSON)
     status = Column(String, nullable=False, server_default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    status = Column(String, nullable=False, server_default="pending")
 
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 

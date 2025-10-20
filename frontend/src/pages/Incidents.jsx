@@ -6,6 +6,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { format } from "date-fns";
 import { API_BASE } from "../config";   // <-- add/remove this line as needed
+import ViolationModal from "../components/ViolationModal";
 
 export default function Incident() {
   const [notifications, setNotifications] = useState([]);
@@ -14,15 +15,23 @@ export default function Incident() {
     violation: "",
     date: null,
     sortBy: "newest",
+    status: "",
   });
+
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(5);
 
+  const [showModal, setShowModal] = useState(false);
+  const [selectedViolation, setSelectedViolation] = useState(null);
+  const [updating, setUpdating] = useState(false);
+
+ const statusOptions = ["Pending", "Resolved", "False Positive"];
+
   useEffect(() => {
     const token = localStorage.getItem("token");
-    //fetch("http://localhost:8000/violations/", {
-    fetch(`${API_BASE}/violations/`, {
+    fetch("http://localhost:8000/violations/", {
+    //fetch(`${API_BASE}/violations/`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -43,8 +52,8 @@ export default function Incident() {
 
 useEffect(() => {
   const token = localStorage.getItem("token");
-  //fetch("http://localhost:8000/cameras/", {
-  fetch(`${API_BASE}/cameras/`, {
+  fetch("http://localhost:8000/cameras/", {
+  //fetch(`${API_BASE}/cameras/`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -61,7 +70,7 @@ useEffect(() => {
     "No Helmet",
     "No Vest",
     "No Gloves",
-    "No Safety Shoes",
+    "No Boots",
   ];
 
   const filteredNotifications = notifications
@@ -81,19 +90,21 @@ useEffect(() => {
       }
       if (filters.camera && n.camera !== filters.camera) return false;
       if (filters.violation && n.violation !== filters.violation) return false;
+      if (filters.status && n.status?.toLowerCase() !== filters.status.toLowerCase())
+        return false;
       if (filters.date) {
-        const notificationDate = new Date(n.date.split(" ")[0]);
-        const filterDate = new Date(filters.date);
-        if (notificationDate.toDateString() !== filterDate.toDateString())
-          return false;
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      const dateA = new Date(a.date);
-      const dateB = new Date(b.date);
-      return filters.sortBy === "newest" ? dateB - dateA : dateA - dateB;
-    });
+      const notificationDate = new Date(n.created_at);
+      const filterDate = new Date(filters.date);
+      if (notificationDate.toDateString() !== filterDate.toDateString())
+        return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.created_at);
+        const dateB = new Date(b.created_at);
+        return filters.sortBy === "newest" ? dateB - dateA : dateA - dateB;
+      });
 
   const totalPages = Math.ceil(filteredNotifications.length / itemsPerPage);
   const currentItems = filteredNotifications.slice(
@@ -101,20 +112,58 @@ useEffect(() => {
     currentPage * itemsPerPage
   );
 
-  // Function to determine status badge color
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case "resolved":
-        return "bg-green-600 text-white";
-      case "reviewing":
-        return "bg-yellow-500 text-black";
-      case "rejected":
-        return "bg-red-600 text-white";
+        return "bg-green-500/20 text-green-400 border-green-600/50";
+      case "false positive":
+        return "bg-yellow-500/20 text-yellow-300 border-yellow-600/50";
       case "pending":
       default:
-        return "bg-gray-500 text-white";
+        return "bg-red-500/20 text-red-400 border-red-600/50";
     }
   };
+
+  // Handle open modal
+  const handleView = (violation) => {
+    setSelectedViolation(violation);
+    setShowModal(true);
+  };
+
+  const handleStatusChange = async (newStatus) => {
+  if (!selectedViolation) return;
+  setUpdating(true);
+  try {
+    const token = localStorage.getItem("token");
+
+    const res = await fetch(
+      `http://localhost:8000/violations/${selectedViolation.id}/status`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      }
+    );
+
+    if (!res.ok) throw new Error("Failed to update status");
+    const data = await res.json();
+
+    setNotifications((prev) =>
+      prev.map((v) =>
+        v.id === selectedViolation.id ? { ...v, status: data.status } : v
+      )
+    );
+    setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+  } catch (err) {
+    console.error("Error updating violation status:", err);
+  } finally {
+    setUpdating(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
@@ -200,8 +249,26 @@ useEffect(() => {
               <option value="oldest">Oldest</option>
             </select>
           </div>
-
+          {/* Status */}
           <div className="flex flex-col w-40">
+            <label className="font-medium text-sm mb-1 text-gray-400">
+              Status
+            </label>
+            <select
+              value={filters.status}
+              onChange={(e) => handleChange("status", e.target.value)}
+              className="px-3 py-3 border border-gray-700 rounded-lg bg-[#2A2B30] shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#5388DF] text-gray-200"
+            >
+              <option value="">All Status</option>
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* <div className="flex flex-col w-40">
             <label className="font-medium text-sm mb-1 text-gray-400">Date</label>
             <div className="relative">
               <DatePicker
@@ -213,7 +280,7 @@ useEffect(() => {
               />
               <FiCalendar className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
-          </div>
+          </div> */}
         </div>
       </section>
 
@@ -258,7 +325,7 @@ useEffect(() => {
                 </span>
               </div>
               <div className="text-gray-300">
-                 {n.frame_ts ? new Date(n.frame_ts).toLocaleString("en-US", {
+                 {n.created_at ? new Date(n.created_at).toLocaleString("en-US", {
                 month: "short",
                 day: "numeric",
                 year: "numeric",
@@ -267,7 +334,10 @@ useEffect(() => {
               }) : "-"}
               </div>
               <div className="text-center">
-                <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
+                 <button
+                  onClick={() => handleView(n)}
+                  className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors"
+                >
                   <FaEye className="mr-2" /> View
                 </button>
               </div>
@@ -307,6 +377,43 @@ useEffect(() => {
           </button>
         </div>
       </section>
+
+      {/* Modal */}
+     {showModal && selectedViolation && (
+  <ViolationModal
+    violation={selectedViolation}
+    onClose={() => setShowModal(false)}
+    onStatusChange={async (newStatus) => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `http://localhost:8000/violations/${selectedViolation.id}/status`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ status: newStatus }),
+          }
+        );
+        if (!res.ok) throw new Error("Failed to update");
+        const data = await res.json();
+
+       
+        setNotifications((prev) =>
+          prev.map((v) =>
+            v.id === selectedViolation.id ? { ...v, status: data.status } : v
+          )
+        );
+        setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+      } catch (err) {
+        console.error("Error updating status:", err);
+      }
+    }}
+  />
+)}
+
     </div>
   );
 }
