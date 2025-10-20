@@ -1,9 +1,23 @@
 // frontend/src/config.js
-export const API_BASE =
-  (typeof window !== "undefined" && window.__ENV && window.__ENV.API_BASE) ||
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) ||
-  "https://27j8aeaqzsqbky-5173.proxy.runpod.net";
-  //"http://127.0.0.1:9000";
+const runtimeEnv = (typeof window !== "undefined" && window.__ENV) ? window.__ENV : {};
+const envApi = runtimeEnv.API_BASE || runtimeEnv.VITE_API_BASE || runtimeEnv.VITE_API_URL;
+const envWs = runtimeEnv.WS_URL || runtimeEnv.VITE_WS_URL || runtimeEnv.WS;
 
-export const WS_BASE = (typeof window !== "undefined" && window.__ENV && window.__ENV.WS_URL) ||
-  (API_BASE.replace(/^http/, "ws"));
+// Prefer runtime env, otherwise use current origin (same scheme + host as page)
+export const API_BASE = envApi || (typeof window !== "undefined" ? window.location.origin : "");
+
+// Derive WS_BASE from runtime or API_BASE. Ensure we return a scheme that matches the page:
+function _deriveWsBase() {
+  if (envWs) return envWs.replace(/\/+$/, "");
+  if (!API_BASE) return "";
+  // if API_BASE is https://host[:port] => wss://host[:port]
+  return API_BASE.replace(/^http/, "ws").replace(/\/+$/, "");
+}
+
+export const WS_BASE = _deriveWsBase();
+
+// For debugging at runtime
+if (typeof window !== "undefined") {
+  // small console-help for debugging
+  console.info("[config] API_BASE =", API_BASE, "WS_BASE =", WS_BASE, "window.__ENV =", runtimeEnv);
+}

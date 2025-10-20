@@ -11,8 +11,6 @@ from fastapi import HTTPException
 
 router = APIRouter()
 
-
-
 @router.get("/workers")
 def get_workers(
     current_user=Depends(get_current_user),
