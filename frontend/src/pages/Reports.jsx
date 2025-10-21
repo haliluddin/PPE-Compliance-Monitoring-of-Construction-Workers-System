@@ -115,7 +115,8 @@ const handleExport = async () => {
     const dd = String(now.getDate()).padStart(2, "0");
     const dateStr = `${yyyy}${mm}${dd}`; // e.g., 20251019
 
-    const filename = `report_${periodParam}_${dateStr}.csv`;
+    const filename = `report_${periodParam}_${getDateRangeLabel().replace(/[^a-zA-Z0-9]/g, "_")}.csv`;
+
 
     // Create downloadable link
     const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -131,10 +132,222 @@ const handleExport = async () => {
   }
 };
 
+const getDateRangeLabel = () => {
+  const now = new Date();
+  let startDate, endDate;
+
+  if (selectedPeriod === "Today") {
+    return now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  }
+
+  if (selectedPeriod === "Last Week") {
+    endDate = new Date(now);
+    startDate = new Date(now);
+    startDate.setDate(now.getDate() - 7);
+  } else if (selectedPeriod === "Last Month") {
+    endDate = new Date(now);
+    startDate = new Date(now);
+    startDate.setMonth(now.getMonth() - 1);
+  }
+
+  const format = (date) =>
+    date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  return `${format(startDate)} - ${format(endDate)}`;
+};
+
+
+const handlePrint = () => {
+  const printContents = document.getElementById("printable-reports").innerHTML;
+  const newWindow = window.open("", "_blank");
+  newWindow.document.write(`
+    <html>
+      <head>
+        <title>Reports - ${selectedPeriod}</title>
+        <style>
+          @media print {
+            @page { size: A4; margin: 20mm; }
+          }
+
+          body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #fff;
+            color: #111827;
+            padding: 20px;
+          }
+
+          h1, h2, h3 {
+            font-weight: 600;
+            color: #111827;
+          }
+
+          h1 {
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 10px;
+          }
+
+          h2 {
+            border-bottom: 2px solid #5388DF;
+            padding-bottom: 5px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            color: #1E40AF;
+          }
+
+          .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+          }
+
+          .card {
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+          }
+
+          .card h3 {
+            font-size: 14px;
+            color: #6B7280;
+            margin-bottom: 6px;
+          }
+
+          .card p {
+            font-size: 22px;
+            font-weight: bold;
+            color: #2563EB;
+          }
+
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            margin-bottom: 20px;
+          }
+
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 8px 10px;
+            text-align: left;
+            font-size: 13px;
+          }
+
+          th {
+            background-color: #f3f4f6;
+            font-weight: 600;
+            color: #374151;
+          }
+
+          tr:nth-child(even) {
+            background-color: #f9fafb;
+          }
+
+          .chart-container {
+            text-align: center;
+            margin: 20px 0;
+          }
+
+          .chart-container img {
+            max-width: 100%;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+          }
+
+          footer {
+            text-align: center;
+            font-size: 12px;
+            color: #6B7280;
+            margin-top: 40px;
+          }
+        </style>
+      </head>
+      <body>
+        <h1>Workplace Violation Report - ${selectedPeriod}</h1>
+        <p style="text-align:center; font-size:14px; color:#6B7280; margin-top:0;">
+          ${getDateRangeLabel()}
+        </p>
+
+        <div class="cards">
+          <div class="card">
+            <h3>Total Incidents</h3>
+            <p>${stats.total_incidents}</p>
+          </div>
+          <div class="card">
+            <h3>Total Workers Involved</h3>
+            <p>${stats.total_workers_involved}</p>
+          </div>
+          <div class="card">
+            <h3>Violation Resolution Rate</h3>
+            <p style="color:#059669">${stats.violation_resolution_rate}%</p>
+          </div>
+          <div class="card">
+            <h3>High Risk Locations</h3>
+            <p style="color:#DC2626">${stats.high_risk_locations}</p>
+          </div>
+        </div>
+
+        <h2>Camera Locations</h2>
+        <table>
+          <thead>
+            <tr><th>Location</th><th>Violations</th><th>Risk Level</th></tr>
+          </thead>
+          <tbody>
+            ${cameraData.map(loc => `
+              <tr>
+                <td>${loc.location}</td>
+                <td>${loc.violations}</td>
+                <td>${loc.risk}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+
+        <h2>Violation Resolution Rate (by Worker)</h2>
+        <table>
+          <thead>
+            <tr><th>Rank</th><th>Worker</th><th>Violations</th><th>Resolved</th><th>Resolution Rate</th></tr>
+          </thead>
+          <tbody>
+            ${workerData.map(w => `
+              <tr>
+                <td>${w.rank}</td>
+                <td>${w.name}</td>
+                <td>${w.violations}</td>
+                <td>${w.resolved}</td>
+                <td>${w.resolution_rate}%</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+
+        <div class="chart-container">
+          <h2>Charts & Graphs</h2>
+          <p>(Refer to full dashboard for interactive charts)</p>
+          <img src="data:image/png;base64,${window.html2canvas ? '' : ''}" alt="Charts Preview Placeholder">
+        </div>
+
+        <footer>
+          Generated automatically by Safety Monitoring System • ${new Date().toLocaleString()}
+        </footer>
+      </body>
+    </html>
+  `);
+
+  newWindow.document.close();
+  newWindow.focus();
+  newWindow.print();
+};
+
+
 
 
   return (
-    <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
+    <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6" id="printable-reports">
+
     
       {/* Header */}
       <header className="bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg mb-8">
@@ -161,10 +374,14 @@ const handleExport = async () => {
         </button>
 
         
-        <button className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors">
+        <button
+          onClick={handlePrint}
+          className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors"
+        >
           <HiOutlinePrinter className="w-4 h-4" />
           Print
         </button>
+
 
         <div className="ml-auto flex items-center gap-2">
           <button
