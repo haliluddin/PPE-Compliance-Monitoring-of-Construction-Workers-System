@@ -10,6 +10,7 @@ import ViolationModal from "../components/ViolationModal";
 const audio = new Audio("/notification.mp3");
 audio.preload = "auto";
 
+import { WS_BASE } from "../config";
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
@@ -124,8 +125,11 @@ export default function Notifications() {
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
-
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications?token=${token}`);
+    
+    // build ws url — make sure it ends with "/ws/notifications"
+    const wsBaseClean = (WS_BASE || window.location.origin.replace(/^http/, "ws")).replace(/\/+$/, "");
+    const wsUrl = `${wsBaseClean}/ws/notifications?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => console.log("Connected to notification WebSocket");
 

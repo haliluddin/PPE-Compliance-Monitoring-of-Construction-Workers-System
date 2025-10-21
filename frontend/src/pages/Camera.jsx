@@ -1,29 +1,8 @@
+// frontend/src/pages/Camera.jsx
 import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
 import ImageCard from "../components/ImageCard";
 import { useState, useEffect, useRef } from "react";
-
-const API_BASE = (typeof window !== "undefined" && window.__ENV && window.__ENV.API_BASE)
-  || (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE)
-  || "http://127.0.0.1:9000";
-
-const raw_ws_env = (typeof window !== "undefined" && window.__ENV && (window.__ENV.VITE_WS_URL || window.__ENV.WS_URL))
-  || (typeof import.meta !== "undefined" && import.meta.env && (import.meta.env.VITE_WS_URL || import.meta.env.WS_URL))
-  || null;
-
-function normalizeWsBase(raw, apiBaseFallback) {
-  if (raw) {
-    if (raw.startsWith("ws://") || raw.startsWith("wss://")) return raw.replace(/\/+$/, "");
-    if (raw.startsWith("http://")) return raw.replace(/^http:\/\//, "ws://").replace(/\/+$/, "");
-    if (raw.startsWith("https://")) return raw.replace(/^https:\/\//, "wss://").replace(/\/+$/, "");
-    return raw.replace(/\/+$/, "");
-  }
-  if (!apiBaseFallback) return "";
-  if (apiBaseFallback.startsWith("https://")) return apiBaseFallback.replace(/^https:\/\//, "wss://").replace(/\/+$/, "");
-  if (apiBaseFallback.startsWith("http://")) return apiBaseFallback.replace(/^http:\/\//, "ws://").replace(/\/+$/, "");
-  return apiBaseFallback.replace(/\/+$/, "");
-}
-
-const WS_BASE = normalizeWsBase(raw_ws_env, API_BASE);
+import { API_BASE, WS_BASE } from "../config";
 
 export default function Camera() {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -61,7 +40,7 @@ export default function Camera() {
     fetchBackendStatus();
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
     let mounted = true;
     async function loadCameras() {
       try {
@@ -434,7 +413,7 @@ export default function Camera() {
               </div>
             </div>
             <div className="w-full h-[60vh] bg-black rounded overflow-hidden flex items-center justify-center">
-              {selectedCamera.frameSrc ? (
+               {selectedCamera.frameSrc ? (
                 <img alt="annotated" src={selectedCamera.frameSrc} className="object-contain w-full h-full" />
               ) : (
                 <video controls src={selectedCamera.videoUrl} className="object-contain w-full h-full" />

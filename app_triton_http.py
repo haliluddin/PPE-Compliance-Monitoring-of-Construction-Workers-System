@@ -1,3 +1,4 @@
+# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -22,8 +23,9 @@ import redis
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
 from app.database import SessionLocal
-from app.models import Job, Camera, Violation
+from app.models import Job, Camera, Violation, User
 from app.tasks import process_image_task, process_image
+from app.router.auth import verify_token
 import base64
 
 log = logging.getLogger("uvicorn.error")
@@ -67,6 +69,12 @@ try:
 except Exception:
     pass
 
+try:
+    from app.router.notifications_ws import router as notifications_ws_router
+    app.include_router(notifications_ws_router)
+except Exception:
+    pass
+
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
@@ -106,6 +114,46 @@ def load_model_metadata(client, model_name):
         return {'input_name': input_name, 'output_names': output_names}
     except Exception:
         return {'input_name': None, 'output_names': []}
+
+def _get_user_id_from_request(request: Request):
+    try:
+        auth = request.headers.get("Authorization", "") or ""
+    except Exception:
+        auth = ""
+    if not auth:
+        token = None
+    else:
+        if auth.startswith("Bearer "):
+            token = auth.split(" ", 1)[1]
+        else:
+            token = auth
+    if not token:
+        return None
+    try:
+        payload = verify_token(token)
+        sub = payload.get("sub")
+        if sub is not None:
+            try:
+                return int(sub)
+            except Exception:
+                return None
+    except Exception:
+        return None
+    return None
+
+def _get_or_create_fallback_user_id():
+    sess = SessionLocal()
+    try:
+        user = sess.query(User).first()
+        if user:
+            return user.id
+        default = User(name="admin", email="admin@example.com", hashed_password="", is_supervisor=True)
+        sess.add(default)
+        sess.commit()
+        sess.refresh(default)
+        return default.id
+    finally:
+        sess.close()
 
 @app.on_event("startup")
 def startup_event():
@@ -225,6 +273,7 @@ async def redis_subscriber_task():
                         payload = json.loads(data)
                 except Exception:
                     payload = {"raw": str(data)}
+                print('redis_subscriber got:', payload)
                 coros = [ws.send_json(payload) for ws in list(ws_clients)]
                 if coros:
                     await asyncio.gather(*coros, return_exceptions=True)
@@ -233,13 +282,15 @@ async def redis_subscriber_task():
         await asyncio.sleep(0.01)
 
 @app.post("/jobs")
-def create_job(payload: dict):
+def create_job(payload: dict, request: Request):
     sess = SessionLocal()
     try:
+        uid = _get_user_id_from_request(request)
+        user_id = uid if uid else _get_or_create_fallback_user_id()
         job_type = payload.get("job_type", "video")
         camera_id = payload.get("camera_id")
         meta = payload.get("meta", {})
-        job = Job(job_type=job_type, camera_id=camera_id, status="queued", meta=meta)
+        job = Job(job_type=job_type, camera_id=camera_id, status="queued", meta=meta, user_id=user_id)
         sess.add(job)
         sess.commit()
         sess.refresh(job)
@@ -394,14 +445,16 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
         sess.close()
 
 @app.post("/streams")
-def start_stream(payload: StreamStart):
+def start_stream(payload: StreamStart, request: Request):
     rtsp_url = payload.rtsp_url or payload.stream_url
     camera_id = payload.camera_id
     job_id = payload.job_id
     if job_id is None:
         sess = SessionLocal()
         try:
-            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url})
+            uid = _get_user_id_from_request(request)
+            user_id = uid if uid else _get_or_create_fallback_user_id()
+            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url}, user_id=user_id)
             sess.add(job)
             sess.commit()
             sess.refresh(job)
@@ -414,6 +467,8 @@ def start_stream(payload: StreamStart):
             cam = sess2.query(Camera).filter(Camera.id == camera_id).first()
             if cam:
                 cam.stream_url = rtsp_url
+                if getattr(cam, "user_id", None) is None:
+                    cam.user_id = _get_or_create_fallback_user_id()
                 sess2.commit()
         finally:
             sess2.close()
@@ -569,13 +624,15 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
         sess.close()
 
 @app.post("/cameras")
-def create_camera(payload: dict):
+def create_camera(payload: dict, request: Request):
     sess = SessionLocal()
     try:
+        uid = _get_user_id_from_request(request)
+        user_id = uid if uid else _get_or_create_fallback_user_id()
         name = payload.get("name") if isinstance(payload, dict) else None
         location = payload.get("location") if isinstance(payload, dict) else None
         stream_url = payload.get("stream_url") if isinstance(payload, dict) else None
-        cam = Camera(name=name or "Camera", location=location or "", stream_url=stream_url or None)
+        cam = Camera(name=name or "Camera", location=location or "", stream_url=stream_url or None, user_id=user_id)
         sess.add(cam)
         sess.commit()
         sess.refresh(cam)
