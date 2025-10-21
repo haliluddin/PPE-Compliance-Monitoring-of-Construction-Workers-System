@@ -7,14 +7,15 @@ import { FaMapMarkerAlt, FaUserAlt, FaChartLine } from 'react-icons/fa';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend, AreaChart, Area } from 'recharts';
 
 export default function Reports() {
+const [selectedPeriod, setSelectedPeriod] = useState("Today");
 
-  const [selectedPeriod, setSelectedPeriod] = useState("Today");
   const [stats, setStats] = useState({
     total_incidents: 0,
     total_workers_involved: 0,
-    compliance_rate: 0,
+    violation_resolution_rate: 0,
     high_risk_locations: 0,
   });
+
   const [violationsData, setViolationsData] = useState([]);
   const [offendersData, setOffendersData] = useState([]);
 
@@ -34,15 +35,16 @@ export default function Reports() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
- setCameraData(response.data.camera_data || []);
-setWorkerData(response.data.worker_data || []);
+      setCameraData(response.data.camera_data || []);
+      setWorkerData(response.data.worker_data || []);
 
       setStats({
-        total_incidents: response.data.total_incidents,
-        total_workers_involved: response.data.total_workers_involved,
-        compliance_rate: response.data.compliance_rate,
-        high_risk_locations: response.data.high_risk_locations,
-      });
+      total_incidents: response.data.total_incidents,
+      total_workers_involved: response.data.total_workers_involved,
+      violation_resolution_rate: response.data.violation_resolution_rate,
+      high_risk_locations: response.data.high_risk_locations,
+    });
+
 
       setViolationsData(response.data.most_violations);
       setOffendersData(
@@ -220,9 +222,10 @@ const handleExport = async () => {
   </div>
 
   <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-    <h3 className="text-sm font-medium text-gray-400 mb-2">Overall Compliance</h3>
-    <p className="text-4xl font-bold text-green-500">{stats.compliance_rate}%</p>
+    <h3 className="text-sm font-medium text-gray-400 mb-2">Violation Resolution Rate</h3>
+    <p className="text-4xl font-bold text-green-500">{stats.violation_resolution_rate}%</p>
   </div>
+
 
   <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
     <h3 className="text-sm font-medium text-gray-400 mb-2">High Risk Locations</h3>
@@ -378,7 +381,7 @@ const handleExport = async () => {
         <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
           <div className="flex items-center gap-2 mb-4">
           <FaUserAlt className="text-[#5388DF]" />
-            <h3 className="text-xl font-semibold text-gray-200">Worker Compliance Score</h3>
+            <h3 className="text-xl font-semibold text-gray-200">Violation Resolution Rate</h3>
           </div>
                   <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
             {workerData.map((worker) => (
@@ -398,13 +401,16 @@ const handleExport = async () => {
                   </div>
                   <div className="text-right">
                     <p className={`text-lg font-bold ${
-                      worker.compliance >= 95 ? 'text-green-500' :
-                      worker.compliance >= 90 ? 'text-yellow-500' :
+                      worker.resolution_rate >= 95 ? 'text-green-500' :
+                      worker.resolution_rate >= 80 ? 'text-yellow-500' :
                       'text-red-500'
                     }`}>
-                      {worker.compliance}%
+                      {worker.resolution_rate}%
                     </p>
-                    <p className="text-gray-400 text-xs">Compliance</p>
+                    <p className="text-gray-400 text-xs">Resolution Rate</p>
+                    <p className="text-gray-400 text-sm">
+                      {worker.resolved} resolved / {worker.violations} total
+                    </p>
                   </div>
                 </div>
               </div>

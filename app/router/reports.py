@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, case
 from datetime import datetime, timedelta
 from app.database import get_db
 from app.models import Violation, Worker, Camera
@@ -9,6 +9,7 @@ from datetime import timezone
 import csv
 from fastapi.responses import StreamingResponse
 from io import StringIO
+from sqlalchemy import cast, Date
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -50,10 +51,24 @@ def get_reports_summary(
         .scalar() or 0
     )
 
-    # === Compliance Rate ===
-    total_workers = db.query(func.count(Worker.id)).filter(Worker.user_id == user_id).scalar() or 1
-    non_violating_workers = total_workers - total_workers_involved
-    compliance_rate = round((non_violating_workers / total_workers) * 100, 2)
+   # === Violation Resolution Rate ===
+    resolved_count = (
+        db.query(func.count(Violation.id))
+        .filter(Violation.user_id == user_id, date_filter, Violation.status == "resolved")
+        .scalar() or 0
+    )
+
+    total_violations = (
+        db.query(func.count(Violation.id))
+        .filter(Violation.user_id == user_id, date_filter)
+        .scalar() or 0
+    )
+
+    violation_resolution_rate = (
+        round((resolved_count / total_violations) * 100, 2)
+        if total_violations > 0 else 0
+    )
+
 
     # === High-Risk Locations ===
     high_risk_locations = (
@@ -117,14 +132,17 @@ def get_reports_summary(
             "risk": risk
         })
 
-    # === Worker Compliance Scores ===
-    worker_stats = (
+   # === Worker Violation Resolution Rate ===
+    worker_resolution_stats = (
         db.query(
+            Worker.id,
             Worker.fullName.label("name"),
-            func.count(Violation.id).label("violations")
+            func.count(Violation.id).label("total_violations"),
+            func.sum(case((Violation.status == "resolved", 1), else_=0)).label("resolved_violations")
         )
         .outerjoin(Violation, and_(
             Worker.id == Violation.worker_id,
+            Violation.user_id == user_id,
             Violation.created_at >= start_date,
             Violation.created_at < end_date
         ))
@@ -133,23 +151,25 @@ def get_reports_summary(
         .all()
     )
 
-
-
     worker_data = []
-    for rank, w in enumerate(sorted(worker_stats, key=lambda x: x.violations)):
-        violations = w.violations or 0
-        compliance = max(0, 100 - (violations * 5))
+    for rank, w in enumerate(worker_resolution_stats, start=1):
+        total = w.total_violations or 0
+        resolved = w.resolved_violations or 0
+        resolution_rate = round((resolved / total) * 100, 2) if total > 0 else 0
+
         worker_data.append({
-            "rank": rank + 1,
+            "rank": rank,
             "name": w.name,
-            "violations": violations,
-            "compliance": compliance
+            "violations": total,
+            "resolved": resolved,
+            "resolution_rate": resolution_rate
         })
+
 
     return {
         "total_incidents": total_incidents,
         "total_workers_involved": total_workers_involved,
-        "compliance_rate": compliance_rate,
+        "violation_resolution_rate": violation_resolution_rate,
         "high_risk_locations": high_risk_locations,
         "most_violations": [{"name": v[0], "violators": v[1]} for v in most_violations],
         "top_offenders": [{"name": w[0], "value": w[1]} for w in top_offenders],
@@ -180,7 +200,7 @@ def get_performance_data(
     date_filter = and_(Violation.created_at >= start_date, Violation.created_at < end_date, Violation.user_id == user_id)
 
     # --- Performance Over Time (daily counts) ---
-    from sqlalchemy import cast, Date
+  
 
     daily_stats = (
         db.query(
