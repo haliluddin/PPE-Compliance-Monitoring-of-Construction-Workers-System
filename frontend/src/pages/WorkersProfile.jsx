@@ -34,11 +34,16 @@ const [statusFilter, setStatusFilter] = useState('All');
 
         const total = data.violationHistory?.length || 0;
         const compliant = data.violationHistory?.filter(v => v.type === 'No Violation').length || 0;
-        data.complianceRate = total > 0 ? Math.round((compliant / total) * 100) : 100;
+        data.resolutionRate = total > 0
+        ? Math.round(
+            (data.violationHistory.filter(v => v.status === 'resolved').length / total) * 100
+          )
+        : 0;
 
         const sortedViolations = data.violationHistory?.sort((a, b) => new Date(b.date) - new Date(a.date));
         data.lastViolationDate = sortedViolations?.[0]?.date || null;
         data.totalViolations = total;
+        data.resolvedViolations = data.violationHistory?.filter(v => v.status === 'resolved').length || 0;
 
         setWorkerData(data);
       } catch (error) {
@@ -150,7 +155,12 @@ const exportToPDF = () => {
   yPos += 20;
   doc.text(`Total Violations: ${workerData.totalViolations}`, margin, yPos);
   yPos += 20;
-  doc.text(`Compliance Rate: ${workerData.complianceRate}%`, margin, yPos);
+  doc.text(
+  `Violation Resolution Rate: ${workerData.resolutionRate}% (${workerData.resolvedViolations} resolved out of ${workerData.totalViolations})`,
+  margin,
+  yPos
+);
+
   yPos += 30;
 
   // Section Separator
@@ -344,13 +354,18 @@ const exportToPDF = () => {
         <div className="bg-[#2A2B30] p-4 rounded-xl shadow-lg">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm text-gray-400">Compliance Rate</p>
-              <p className="text-2xl font-bold text-white mt-1">{workerData.complianceRate || 0}%</p>
+             <p className="text-sm text-gray-400">Violation Resolution Rate</p>
+              <p className="text-2xl font-bold text-white mt-1">
+                {workerData.resolutionRate || 0}%
+              </p>
+              <p className="text-sm text-gray-400 mt-1">
+                {workerData.resolvedViolations || 0} resolved out of {workerData.totalViolations || 0}
+              </p>
               <div className="mt-2">
                 <span className={`text-xs font-medium ${
-                  workerData.complianceRate < 90 ? 'text-yellow-400' : 'text-green-400'
+                  workerData.resolutionRate < 80 ? 'text-yellow-400' : 'text-green-400'
                 }`}>
-                  {workerData.complianceRate < 90 ? 'Needs Improvement' : 'Good'}
+                  {workerData.resolutionRate < 80 ? 'Needs Improvement' : 'Good'}
                 </span>
               </div>
             </div>
