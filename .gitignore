@@ -11,4 +11,4 @@ training/notebook
 # scripts
 training/scripts
 
-data/yolo
+data/yolo/train
