@@ -30,8 +30,8 @@ export default function Incident() {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    fetch("http://localhost:8000/violations/", {
-    //fetch(`${API_BASE}/violations/`, {
+    //fetch("http://localhost:8000/violations/", {
+    fetch(`${API_BASE}/violations/`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -52,8 +52,8 @@ export default function Incident() {
 
 useEffect(() => {
   const token = localStorage.getItem("token");
-  fetch("http://localhost:8000/cameras/", {
-  //fetch(`${API_BASE}/cameras/`, {
+  //fetch("http://localhost:8000/cameras/", {
+  fetch(`${API_BASE}/cameras/`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -137,7 +137,7 @@ useEffect(() => {
     const token = localStorage.getItem("token");
 
     const res = await fetch(
-      `http://localhost:8000/violations/${selectedViolation.id}/status`,
+      `${API_BASE}/violations/${selectedViolation.id}/status`,
       {
         method: "PUT",
         headers: {
@@ -387,7 +387,7 @@ useEffect(() => {
       try {
         const token = localStorage.getItem("token");
         const res = await fetch(
-          `http://localhost:8000/violations/${selectedViolation.id}/status`,
+          `${API_BASE}/violations/${selectedViolation.id}/status`,
           {
             method: "PUT",
             headers: {

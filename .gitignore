@@ -10,3 +10,5 @@ training/yolov8
 training/notebook
 # scripts
 training/scripts
+
+data/yolo

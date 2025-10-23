@@ -29,17 +29,17 @@ export default function Sidebar() {
     const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
+    const data = JSON.parse(event.data);
 
-  // Only trigger dot if it's a NEW violation
-  if (data.type === "new_violation") {
-    setUnreadCount((prev) => prev + 1);
-  }
+    // Only trigger dot if it's a NEW violation
+    if (data.type === "new_violation") {
+      setUnreadCount((prev) => prev + 1);
+    }
 
-  // Ignore status updates
-  if (data.type === "status_update") {
-    console.log("✅ Status updated, no new notification triggered");
-  }
+    // Ignore status updates
+    if (data.type === "status_update") {
+      console.log("✅ Status updated, no new notification triggered");
+    }
 };
 
 

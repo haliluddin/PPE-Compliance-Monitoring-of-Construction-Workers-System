@@ -3,8 +3,8 @@ import axios from "axios";
 import { API_BASE } from "./config";
 
 const API = axios.create({
-   baseURL: "http://localhost:8000",
- // baseURL: API_BASE || undefined, // undefined means "relative" requests go to same origin
+  //baseURL: "http://localhost:8000",
+  baseURL: API_BASE || undefined, 
 });
 
 API.interceptors.request.use((req) => {

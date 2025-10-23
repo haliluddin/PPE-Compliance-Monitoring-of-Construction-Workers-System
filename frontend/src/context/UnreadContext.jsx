@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import API from "../api";
+import { WS_BASE } from "../config";
 
 const UnreadContext = createContext();
 
@@ -53,7 +54,10 @@ export function UnreadProvider({ children }) {
     const token = localStorage.getItem("token");
     if (!token) return;
 
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications?token=${token}`);
+    const wsBaseClean = (WS_BASE || window.location.origin.replace(/^http/, "ws")).replace(/\/+$/, "");
+    const wsUrl = `${wsBaseClean}/ws/notifications?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(wsUrl);
+
     ws.onopen = () => console.log("Connected to notification WebSocket");
 
     ws.onmessage = (event) => {

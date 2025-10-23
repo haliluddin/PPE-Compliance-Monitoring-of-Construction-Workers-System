@@ -75,6 +75,12 @@ try:
 except Exception:
     pass
 
+try:
+    from app.router.reports import router as reports_router
+    app.include_router(reports_router)
+except Exception:
+    pass
+
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")

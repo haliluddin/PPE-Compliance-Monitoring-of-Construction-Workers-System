@@ -6,6 +6,7 @@ import { FiMoreVertical, FiSearch } from "react-icons/fi";
 import { LuBellRing } from "react-icons/lu";
 import { useUnread } from "../context/UnreadContext";
 import ViolationModal from "../components/ViolationModal";
+import { API_BASE } from "../config";   // <-- add/remove this line as needed
 
 const audio = new Audio("/notification.mp3");
 audio.preload = "auto";
@@ -28,7 +29,7 @@ export default function Notifications() {
       const fetchCameras = async () => {
         try {
           const token = localStorage.getItem("token");
-          const res = await fetch("http://localhost:8000/cameras/", {
+          const res = await fetch("${API_BASE}/cameras/", {
             headers: {
               Authorization: `Bearer ${token}`,
             },
@@ -460,7 +461,7 @@ const isNewViolation = data.violation_id && !notifications.some(n => n.violation
 
               // Update violation status on backend
               const res = await fetch(
-                `http://localhost:8000/violations/${selectedViolation.id}/status`,
+                `${API_BASE}/violations/${selectedViolation.id}/status`,
                 {
                   method: "PUT",
                   headers: {
