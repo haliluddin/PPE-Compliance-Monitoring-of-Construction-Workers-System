@@ -12,4 +12,4 @@ training/notebook
 training/scripts
 
 data/yolo/train/images-44
-data/yolo/train/labels
+data/yolo/train/labelsyo
