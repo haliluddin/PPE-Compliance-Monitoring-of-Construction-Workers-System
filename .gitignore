@@ -11,4 +11,5 @@ training/notebook
 # scripts
 training/scripts
 
-data/yolo/train
+data/yolo/train/images-44
+data/yolo/train/labels
