@@ -11,26 +11,4 @@ training/notebook
 # scripts
 training/scripts
 
-app/
-.vscode/
-assets/
-document/
-frontend/
-notebook/
-scripts/
-sql/
-training/
-triton_model_repo/
-.dockerignore
-app_triton_http.py
-best.pt
-create_tables.py
-docker-compose.yml
-Dockerfile
-package-lock.json
-package.json
-ppe_local.db
-prometheus.yml
-requirements.txt
-run_local_pipeline.py
-yolov8n.pt
+data/yolo
