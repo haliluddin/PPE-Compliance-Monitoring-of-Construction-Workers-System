@@ -23,7 +23,7 @@ class WorkerCreate(BaseModel):
     # role: str
     dateAdded: date
     status: str
-    registered: bool = False  
+    registered: bool = True  
 
 class WorkerResponse(BaseModel):
     id: int

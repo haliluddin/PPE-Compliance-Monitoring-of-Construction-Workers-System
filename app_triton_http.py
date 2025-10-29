@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -27,6 +26,7 @@ from app.models import Job, Camera, Violation, User
 from app.tasks import process_image_task, process_image
 from app.router.auth import verify_token
 import base64
+from collections import deque
 
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
@@ -101,6 +101,11 @@ STREAM_EVENTS = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
 
+PROCESS_QUEUE = deque()
+PROCESS_QUEUE_LOCK = threading.Lock()
+PROCESS_WORKERS = {}
+PROCESS_WORKER_COUNT = int(os.environ.get("PROCESS_WORKER_COUNT", "2"))
+
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -161,6 +166,30 @@ def _get_or_create_fallback_user_id():
     finally:
         sess.close()
 
+def processing_worker(worker_idx: int):
+    global PROCESS_QUEUE, redis_sync
+    while True:
+        item = None
+        with PROCESS_QUEUE_LOCK:
+            if PROCESS_QUEUE:
+                item = PROCESS_QUEUE.popleft()
+        if item is None:
+            time.sleep(0.01)
+            continue
+        try:
+            img_bytes, meta = item.get("img_bytes"), item.get("meta")
+            try:
+                process_image(img_bytes, meta)
+            except Exception:
+                try:
+                    b64 = base64.b64encode(img_bytes).decode("ascii")
+                    process_image_task.delay(b64, meta)
+                    TASKS_QUEUED.inc()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
 @app.on_event("startup")
 def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
@@ -212,6 +241,10 @@ def startup_event():
         redis_pubsub = None
     APP_LOOP = asyncio.get_event_loop()
     asyncio.create_task(redis_subscriber_task())
+    for i in range(PROCESS_WORKER_COUNT):
+        t = threading.Thread(target=processing_worker, args=(i,), daemon=True)
+        t.start()
+        PROCESS_WORKERS[i] = t
 
 @app.on_event("shutdown")
 def shutdown_event():
@@ -279,7 +312,6 @@ async def redis_subscriber_task():
                         payload = json.loads(data)
                 except Exception:
                     payload = {"raw": str(data)}
-                print('redis_subscriber got:', payload)
                 coros = [ws.send_json(payload) for ws in list(ws_clients)]
                 if coros:
                     await asyncio.gather(*coros, return_exceptions=True)
@@ -321,31 +353,23 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 break
             if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
                 try:
-                    _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    h, w = frame.shape[:2]
+                    max_w = int(os.environ.get("REALTIME_MAX_WIDTH", "640"))
+                    if w > max_w:
+                        scale = max_w / w
+                        new_w = int(w * scale)
+                        new_h = int(h * scale)
+                        frame_small = cv2.resize(frame, (new_w, new_h))
+                    else:
+                        frame_small = frame
+                    _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), int(os.environ.get("REALTIME_JPEG_Q", "60"))])
                     img_bytes = jpg.tobytes()
                 except Exception:
                     frame_idx += 1
                     continue
                 meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-                img_b64 = base64.b64encode(img_bytes).decode("ascii")
-                if USE_CELERY:
-                    try:
-                        process_image_task.delay(img_b64, meta)
-                        TASKS_QUEUED.inc()
-                    except Exception:
-                        try:
-                            process_image(img_bytes, meta)
-                        except Exception:
-                            pass
-                else:
-                    try:
-                        process_image(img_bytes, meta)
-                    except Exception:
-                        try:
-                            process_image_task.delay(img_b64, meta)
-                            TASKS_QUEUED.inc()
-                        except Exception:
-                            pass
+                with PROCESS_QUEUE_LOCK:
+                    PROCESS_QUEUE.append({"img_bytes": img_bytes, "meta": meta})
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -416,28 +440,24 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             if not ret:
                 time.sleep(0.05)
                 continue
-            _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            img_bytes = jpg.tobytes()
+            try:
+                h, w = frame.shape[:2]
+                max_w = int(os.environ.get("REALTIME_MAX_WIDTH", "640"))
+                if w > max_w:
+                    scale = max_w / w
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    frame_small = cv2.resize(frame, (new_w, new_h))
+                else:
+                    frame_small = frame
+                _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), int(os.environ.get("REALTIME_JPEG_Q", "60"))])
+                img_bytes = jpg.tobytes()
+            except Exception:
+                frame_idx += 1
+                continue
             meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-            img_b64 = base64.b64encode(img_bytes).decode("ascii")
-            if USE_CELERY:
-                try:
-                    process_image_task.delay(img_b64, meta)
-                    TASKS_QUEUED.inc()
-                except Exception:
-                    try:
-                        process_image(img_bytes, meta)
-                    except Exception:
-                        pass
-            else:
-                try:
-                    process_image(img_bytes, meta)
-                except Exception:
-                    try:
-                        process_image_task.delay(img_b64, meta)
-                        TASKS_QUEUED.inc()
-                    except Exception:
-                        pass
+            with PROCESS_QUEUE_LOCK:
+                PROCESS_QUEUE.append({"img_bytes": img_bytes, "meta": meta})
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -664,3 +684,55 @@ def health():
         return {"triton_ready": True, "note": "Triton not present; local processing allowed"}
     ready = triton is not None
     return {"triton_ready": ready}
+
+def persist_violation_to_db_and_publish(worker_code: str, camera_id: int, camera_location: str, detection_meta: dict):
+    sess = SessionLocal()
+    try:
+        v = Violation(
+            job_id=detection_meta.get("job_id"),
+            camera_id=camera_id,
+            worker_code=worker_code,
+            violation_types=detection_meta.get("violation_types") or detection_meta.get("type") or "unknown",
+            frame_index=detection_meta.get("frame_idx"),
+            created_at=datetime.utcnow()
+        )
+        sess.add(v)
+        sess.commit()
+        sess.refresh(v)
+        payload = {
+            "id": v.id,
+            "violation_id": v.id,
+            "worker_code": worker_code,
+            "violation_type": v.violation_types,
+            "camera": camera_location or f"camera:{camera_id}",
+            "camera_location": camera_location or "",
+            "status": getattr(v, "status", "pending"),
+            "created_at": v.created_at.isoformat(),
+            "thumbnail_b64": detection_meta.get("annotated_jpeg_b64")
+        }
+        try:
+            if redis_sync:
+                redis_sync.publish(WS_CHANNEL, json.dumps(payload, default=str))
+        except Exception:
+            pass
+    except Exception:
+        pass
+    finally:
+        sess.close()
+
+def record_and_publish_violation_if_persistent(worker_code: str, camera_id: int, camera_location: str, detection_meta: dict):
+    global redis_sync
+    if redis_sync is None:
+        persist_violation_to_db_and_publish(worker_code, camera_id, camera_location, detection_meta)
+        return
+    key = f"detp:{worker_code}:{camera_id}"
+    threshold = int(os.environ.get("DETECTION_PERSIST_THRESHOLD", "3"))
+    ttl = int(os.environ.get("DETECTION_PERSIST_TTL", "5"))
+    try:
+        cnt = redis_sync.incr(key)
+        redis_sync.expire(key, ttl)
+        if cnt >= threshold:
+            redis_sync.delete(key)
+            persist_violation_to_db_and_publish(worker_code, camera_id, camera_location, detection_meta)
+    except Exception:
+        persist_violation_to_db_and_publish(worker_code, camera_id, camera_location, detection_meta)

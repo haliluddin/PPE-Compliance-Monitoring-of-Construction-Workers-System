@@ -64,6 +64,10 @@ _violation_start_times = {}
 _violation_last_saved = {}
 _violation_last_cleared = {}
 
+_regset_cache = set()
+_regset_cache_ts = 0.0
+_REGSET_CACHE_TTL = 30.0
+
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -362,7 +366,23 @@ def _process_image(image_bytes, meta=None):
             ocr_reader = get_ocr_reader()
         except Exception:
             ocr_reader = None
-        result = process_frame(frame, triton_client=triton, triton_model_name=TRITON_MODEL, ocr_reader=ocr_reader, regset=set(), pose_instance=pose, person_boxes=person_boxes, triton_outputs=triton_out_for_ppe)
+        global _regset_cache, _regset_cache_ts
+        now_ts = time.time()
+        if now_ts - _regset_cache_ts > _REGSET_CACHE_TTL:
+            try:
+                reg_sess = SessionLocal()
+                rows = reg_sess.query(Worker.worker_code).all()
+                _regset_cache = set(str(r[0]).strip() for r in rows if r and r[0] is not None)
+                _regset_cache_ts = now_ts
+            except Exception:
+                _regset_cache = _regset_cache or set()
+            finally:
+                try:
+                    reg_sess.close()
+                except Exception:
+                    pass
+        regset = _regset_cache
+        result = process_frame(frame, triton_client=triton, triton_model_name=TRITON_MODEL, ocr_reader=ocr_reader, regset=regset, pose_instance=pose, person_boxes=person_boxes, triton_outputs=triton_out_for_ppe)
         annotated = None
         if isinstance(result, dict) and "annotated_bgr" in result:
             annotated = result.pop("annotated_bgr")
@@ -440,7 +460,7 @@ def _process_image(image_bytes, meta=None):
                     else:
                         start = _violation_start_times[ktuple]
                         duration = now - start
-                        if duration >= 10.0:
+                        if duration >= 1.0:
                             last_saved = _violation_last_saved.get(ktuple)
                             last_cleared = _violation_last_cleared.get(ktuple)
                             allow_save = False
@@ -491,7 +511,7 @@ def _process_image(image_bytes, meta=None):
                                             x1 = max(0, x1); y1 = max(0, y1); x2 = min(frame.shape[1] - 1, x2); y2 = min(frame.shape[0] - 1, y2)
                                             pc = frame[y1:y2, x1:x2]
                                             try:
-                                                mid, txt, conf = detect_torso(ocr_reader, pc, set())
+                                                mid, txt, conf = detect_torso(ocr_reader, pc, regset)
                                                 if mid is not None and not str(mid).startswith("UNREG:"):
                                                     worker_obj = sess.query(Worker).filter(Worker.worker_code == str(mid)).first()
                                                     if worker_obj:

@@ -49,7 +49,7 @@ class Worker(Base):
     # role = Column(String, nullable=False)
     dateAdded = Column(Date, nullable=False)
     status = Column(String, nullable=False)
-    registered = Column(Boolean, default=False)
+    registered = Column(Boolean, default=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     user = relationship("User", back_populates="workers")
 
