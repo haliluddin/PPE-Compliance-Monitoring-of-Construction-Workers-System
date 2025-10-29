@@ -194,7 +194,7 @@ def _init_local_yolo():
                     if self.ppe_model is None:
                         return {}
                     try:
-                        results = self.ppe_model.predict(source=frame, conf=self.conf, iou=self.iou, classes=[0,1,3,4], verbose=False)
+                        results = self.ppe_model.predict(source=frame, conf=self.conf, iou=self.iou, classes=[0,1,2,3], verbose=False)
                         if not results:
                             return {}
                         r = results[0]
@@ -440,7 +440,7 @@ def _process_image(image_bytes, meta=None):
                     else:
                         start = _violation_start_times[ktuple]
                         duration = now - start
-                        if duration >= 30.0:
+                        if duration >= 10.0:
                             last_saved = _violation_last_saved.get(ktuple)
                             last_cleared = _violation_last_cleared.get(ktuple)
                             allow_save = False

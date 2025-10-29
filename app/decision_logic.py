@@ -13,7 +13,7 @@ import numpy as np
 from collections import defaultdict
 from tritonclient.http import InferInput, InferRequestedOutput
 from threading import Lock
-PPE_CLASS_IDS = [0, 1, 3, 4]
+PPE_CLASS_IDS = [0, 1, 2, 3]
 VIS_THRESH = 0.3
 CROP_PAD = 0.12
 _mp_lock = Lock()
@@ -21,8 +21,8 @@ _mp_pose = None
 _pose_instance = None
 _left_indices = None
 _right_indices = None
-PPE_LABELS = {0: "GLOVE", 1: "HELMET", 3: "SHOE", 4: "VEST"}
-PPE_COLORS = {0: (200, 100, 200), 1: (10, 200, 200), 3: (180, 120, 40), 4: (240, 180, 30)}
+PPE_LABELS = {0: "GLOVE", 1: "HELMET", 2: "SHOE", 3: "VEST"}
+PPE_COLORS = {0: (200, 100, 200), 1: (10, 200, 200), 2: (180, 120, 40), 3: (240, 180, 30)}
 IMPROPER_IOU_THRESH = 0.25
 MIN_HEAD_IOU = 0.05
 def _init_mp_pose():
@@ -166,8 +166,8 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
         lsx = rsx = lhx = rhx = lsy = rsy = lhy = rhy = None; lsv = rsv = lhv = rhv = 0.0
     glove_boxes = boxes_by_class.get(0, [])
     helmet_boxes = boxes_by_class.get(1, [])
-    shoe_boxes = boxes_by_class.get(3, [])
-    vest_boxes = boxes_by_class.get(4, [])
+    shoe_boxes = boxes_by_class.get(2, [])
+    vest_boxes = boxes_by_class.get(3, [])
     wrist_radius = max(16, int((person_bbox[2] - person_bbox[0]) * 0.04))
     if lwv >= VIS_THRESH:
         wb = (lwx - wrist_radius, lwy - wrist_radius, lwx + wrist_radius, lwy + wrist_radius)
@@ -395,7 +395,7 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                     if mid is not None:
                         matched_id = mid
         else:
-            vest_boxes = boxes_by_class.get(4, [])
+            vest_boxes = boxes_by_class.get(3, [])
             helmet_boxes = boxes_by_class.get(1, [])
             if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.03 for (bx1, by1, bx2, by2, _) in vest_boxes):
                 violations.append("NO VEST")
