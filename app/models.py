@@ -1,11 +1,8 @@
 # app/models.py
-from sqlalchemy import Column, Integer, Text, DateTime, JSON, LargeBinary, Boolean, ForeignKey, Column, Integer, String, Date, Text, TIMESTAMP
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, Date, Text, DateTime, JSON, LargeBinary, Boolean, ForeignKey
+from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .database import Base
-from sqlalchemy.sql import func
-
-# Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
@@ -14,29 +11,21 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_supervisor = Column(Boolean, default=False)
-
-    # Relationships
     workers = relationship("Worker", back_populates="user")
-
     violations = relationship("Violation", back_populates="user")
     cameras = relationship("Camera", back_populates="user")
     jobs = relationship("Job", back_populates="user")
     notifications = relationship("Notification", back_populates="user")
-    
+
 class Camera(Base):
     __tablename__ = "cameras"
-
     id = Column(Integer, primary_key=True)
     name = Column(Text, nullable=False)
     location = Column(Text)
     stream_url = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Multi-user support
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     user = relationship("User", back_populates="cameras")
-
-    # Relationship to jobs and violations
     jobs = relationship("Job", back_populates="camera")
     violations = relationship("Violation", back_populates="camera")
 
@@ -45,20 +34,15 @@ class Worker(Base):
     id = Column(Integer, primary_key=True, index=True)
     fullName = Column(String, nullable=False)
     worker_code = Column(String, nullable=False)
-    # assignedLocation = Column(String, nullable=False)
-    # role = Column(String, nullable=False)
-    dateAdded = Column(Date, nullable=False)
-    status = Column(String, nullable=False)
+    dateAdded = Column(Date, nullable=True, server_default=func.current_date())
+    status = Column(String, nullable=False, server_default="Active")
     registered = Column(Boolean, default=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     user = relationship("User", back_populates="workers")
-
     violations = relationship("Violation", back_populates="worker")
-
 
 class Job(Base):
     __tablename__ = "jobs"
-
     id = Column(Integer, primary_key=True)
     job_type = Column(Text, nullable=False)
     status = Column(Text, default="queued")
@@ -66,21 +50,14 @@ class Job(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Multi-user support
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     user = relationship("User", back_populates="jobs")
-
-    # Relationship to camera
     camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=True)
     camera = relationship("Camera", back_populates="jobs")
-
-    # Relationship to violations
     violations = relationship("Violation", back_populates="job")
 
 class Violation(Base):
     __tablename__ = "violations"
-
     id = Column(Integer, primary_key=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=True)
@@ -93,10 +70,7 @@ class Violation(Base):
     inference = Column(JSON)
     status = Column(String, nullable=False, server_default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-
-    # Relationships
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     worker = relationship("Worker", back_populates="violations")
     user = relationship("User", back_populates="violations")
     camera = relationship("Camera", back_populates="violations")
@@ -105,15 +79,11 @@ class Violation(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
-
     id = Column(Integer, primary_key=True, index=True)
     message = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Multi-user and relational fields
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     user = relationship("User", back_populates="notifications")
-
     violation_id = Column(Integer, ForeignKey("violations.id"), nullable=True)
     violation = relationship("Violation", back_populates="notification")

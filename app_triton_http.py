@@ -1,3 +1,4 @@
+# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -18,9 +19,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
 import cv2
-import redis
+try:
+    import redis
+except Exception:
+    redis = None
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
-from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
+try:
+    from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
+except Exception:
+    InferenceServerClient = None
+    InferInput = None
+    InferRequestedOutput = None
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
@@ -40,6 +49,26 @@ try:
 except Exception:
     pass
 try:
+    from app.router.notifications_ws import router as notifications_ws_router
+    app.include_router(notifications_ws_router)
+except Exception:
+    pass
+try:
+    from app.router.notifications import router as notifications_router
+    app.include_router(notifications_router)
+except Exception:
+    pass
+try:
+    from app.router.reports import router as reports_router
+    app.include_router(reports_router)
+except Exception:
+    pass
+try:
+    from app.router.violations import router as violations_router
+    app.include_router(violations_router)
+except Exception:
+    pass
+try:
     from app.router.workers import router as workers_router
     app.include_router(workers_router)
 except Exception:
@@ -48,7 +77,7 @@ INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
 HUMAN_MODEL = os.environ.get("HUMAN_MODEL_NAME", "person_yolo")
-TRITON_URL = os.environ.get("TRITON_URL", "triton:8000")
+TRITON_URL = os.environ.get("TRITON_URL", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 WS_CHANNEL = os.environ.get("WS_CHANNEL", "ppe_results")
 tmp_upload_dir = os.environ.get("UPLOAD_DIR", "/tmp/uploads")
@@ -96,6 +125,10 @@ def startup_event():
         deadline = time.time() + max_wait
         while time.time() < deadline:
             try:
+                if InferenceServerClient is None:
+                    triton = None
+                    triton_models_meta = {}
+                    break
                 client = InferenceServerClient(url=triton_url)
             except Exception:
                 triton = None
@@ -124,9 +157,16 @@ def startup_event():
             time.sleep(interval)
             interval = min(interval * 1.5, 10.0)
     try:
-        redis_sync = redis.Redis.from_url(REDIS_URL)
-        redis_pubsub = redis_sync.pubsub()
-        redis_pubsub.subscribe(WS_CHANNEL)
+        if redis is not None:
+            redis_sync = redis.Redis.from_url(REDIS_URL)
+            redis_pubsub = redis_sync.pubsub()
+            try:
+                redis_pubsub.subscribe(WS_CHANNEL)
+            except Exception:
+                pass
+        else:
+            redis_sync = None
+            redis_pubsub = None
     except Exception:
         redis_sync = None
         redis_pubsub = None
@@ -175,6 +215,25 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
+@app.websocket("/ws/notifications")
+async def websocket_notifications(ws: WebSocket):
+    await ws.accept()
+    ws_clients.add(ws)
+    try:
+        while True:
+            try:
+                await ws.receive_text()
+            except Exception:
+                break
+            try:
+                await ws.send_text("ack")
+            except Exception:
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ws in ws_clients:
+            ws_clients.remove(ws)
 async def redis_subscriber_task():
     global redis_pubsub
     if redis_pubsub is None:
@@ -195,7 +254,12 @@ async def redis_subscriber_task():
                         payload = json.loads(data)
                 except Exception:
                     payload = {"raw": str(data)}
-                coros = [ws.send_json(payload) for ws in list(ws_clients)]
+                coros = []
+                for ws in list(ws_clients):
+                    try:
+                        coros.append(ws.send_json(payload))
+                    except Exception:
+                        pass
                 if coros:
                     await asyncio.gather(*coros, return_exceptions=True)
         except Exception:
@@ -301,7 +365,7 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         thread.start()
         return {"status": "accepted", "job_id": job_id}
 class StreamStart(BaseModel):
-    rtsp_url: str
+    stream_url: str
     camera_id: int = None
     job_id: int = None
 def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threading.Event = None):
@@ -358,13 +422,13 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
         sess.close()
 @app.post("/streams")
 def start_stream(payload: StreamStart):
-    rtsp_url = payload.rtsp_url
+    rtsp_url = payload.stream_url
     camera_id = payload.camera_id
     job_id = payload.job_id
     if job_id is None:
         sess = SessionLocal()
         try:
-            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"rtsp_url": rtsp_url})
+            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url})
             sess.add(job)
             sess.commit()
             sess.refresh(job)

@@ -12,14 +12,12 @@ export default function Camera() {
   const wsRef = useRef(null);
   const fileInputRef = useRef(null);
   const wsPath = (WS_BASE || "").replace(/\/+$/, "") + "/ws";
-
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCamName, setNewCamName] = useState("");
   const [newCamLocation, setNewCamLocation] = useState("");
   const [newCamRtsp, setNewCamRtsp] = useState("");
   const [addingCamera, setAddingCamera] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-
   const [selectedCameraJobId, setSelectedCameraJobId] = useState(null);
 
   useEffect(() => {
@@ -40,7 +38,7 @@ export default function Camera() {
     fetchBackendStatus();
   }, []);
 
-useEffect(() => {
+  useEffect(() => {
     let mounted = true;
     async function loadCameras() {
       try {

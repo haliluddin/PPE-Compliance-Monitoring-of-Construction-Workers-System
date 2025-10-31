@@ -1,3 +1,4 @@
+// frontend/src/pages/Incidents.jsx
 import React, { useState, useEffect } from "react";
 import { FaEye } from "react-icons/fa";
 import { FiSearch } from "react-icons/fi";
@@ -23,22 +24,24 @@ export default function Incident() {
   const [selectedViolation, setSelectedViolation] = useState(null);
   const [updating, setUpdating] = useState(false);
   const statusOptions = ["Pending", "Resolved", "False Positive"];
+
   useEffect(() => {
-    const token = localStorage.getItem("token");
     const fetchViolations = async () => {
       try {
         const res = await API.get("/violations");
         const raw = res.data;
         const arr = Array.isArray(raw) ? raw : raw?.violations || [];
-        setNotifications(arr.map((r) => ({
-          id: r.id,
-          worker_code: r.worker_code,
-          worker: r.worker || r.worker_name,
-          camera: r.camera || r.camera_name || r.camera_id,
-          violation: r.violation_type || r.violation_types || r.violation,
-          created_at: r.created_at || r.createdAt,
-          status: r.status || "Pending"
-        })));
+        setNotifications(
+          arr.map((r) => ({
+            id: r.id,
+            worker_code: r.worker_code,
+            worker: r.worker || r.worker_name,
+            camera: r.camera || r.camera_name || r.camera_id,
+            violation: r.violation_type || r.violation_types || r.violation,
+            created_at: r.created_at || r.createdAt,
+            status: r.status || "Pending",
+          }))
+        );
       } catch (err) {
         console.error("Error fetching violations:", err);
       }
@@ -49,6 +52,7 @@ export default function Incident() {
   const handleChange = (key, value) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
   const handleDateChange = (date) => handleChange("date", date);
+
   const [cameraOptions, setCameraOptions] = useState([]);
   useEffect(() => {
     const fetchCameras = async () => {
@@ -63,10 +67,18 @@ export default function Incident() {
     };
     fetchCameras();
   }, []);
+
   const violationOptions = ["No Helmet", "No Vest", "No Gloves", "No Boots"];
   const filteredNotifications = notifications
     .filter((n) => {
-      if (searchQuery && !((n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) || (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) || (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase())))) {
+      if (
+        searchQuery &&
+        !(
+          (n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
+        )
+      ) {
         return false;
       }
       if (filters.camera && n.camera !== filters.camera) return false;
@@ -109,19 +121,10 @@ export default function Incident() {
     if (!selectedViolation) return;
     setUpdating(true);
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(`${API_BASE}/violations/${selectedViolation.id}/status`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (!res.ok) throw new Error("Failed to update status");
-      const data = await res.json();
-      setNotifications((prev) => prev.map((v) => v.id === selectedViolation.id ? { ...v, status: data.status } : v));
-      setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+      const res = await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+      const data = res.data;
+      setNotifications((prev) => prev.map((v) => v.id === selectedViolation.id ? { ...v, status: data.status || newStatus } : v));
+      setSelectedViolation((prev) => ({ ...prev, status: data.status || newStatus }));
     } catch (err) {
       console.error("Error updating violation status:", err);
     } finally {
@@ -256,19 +259,10 @@ export default function Incident() {
           onClose={() => setShowModal(false)}
           onStatusChange={async (newStatus) => {
             try {
-              const token = localStorage.getItem("token");
-              const res = await fetch(`${API_BASE}/violations/${selectedViolation.id}/status`, {
-                method: "PUT",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ status: newStatus }),
-              });
-              if (!res.ok) throw new Error("Failed to update");
-              const data = await res.json();
-              setNotifications((prev) => prev.map((v) => v.id === selectedViolation.id ? { ...v, status: data.status } : v));
-              setSelectedViolation((prev) => ({ ...prev, status: data.status }));
+              const res = await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+              const data = res.data;
+              setNotifications((prev) => prev.map((v) => v.id === selectedViolation.id ? { ...v, status: data.status || newStatus } : v));
+              setSelectedViolation((prev) => ({ ...prev, status: data.status || newStatus }));
             } catch (err) {
               console.error("Error updating status:", err);
             }

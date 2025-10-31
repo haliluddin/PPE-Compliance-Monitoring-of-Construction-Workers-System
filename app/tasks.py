@@ -1,4 +1,3 @@
-# app/tasks.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -389,7 +388,10 @@ def _process_image(image_bytes, meta=None):
                     worker_code = str(id_label).split(":", 1)[1]
                 else:
                     worker_code = str(id_label)
-                worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
+                try:
+                    worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
+                except Exception:
+                    worker_obj = None
                 if worker_obj is not None:
                     worker_id = worker_obj.id
             if violations and worker_obj is not None:
@@ -419,10 +421,13 @@ def _process_image(image_bytes, meta=None):
                 inference_json = {"person": p, "boxes_by_class": result.get("boxes_by_class", {})}
                 should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
                 if should_save_violation:
-                    v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=";".join(violations), frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
-                    sess.add(v)
-                    sess.commit()
-                    sess.refresh(v)
+                    try:
+                        v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=";".join(violations), frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
+                        sess.add(v)
+                        sess.commit()
+                        sess.refresh(v)
+                    except Exception:
+                        sess.rollback()
             publish_people.append({"bbox": p.get("bbox"), "id": id_label, "violations": violations})
         annotated_b64 = None
         if annotated is not None:

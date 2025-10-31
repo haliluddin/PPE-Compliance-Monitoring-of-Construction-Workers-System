@@ -1,3 +1,4 @@
+// frontend/src/config.js
 const runtimeEnv = (typeof window !== "undefined" && window.__ENV) ? window.__ENV : {};
 const buildEnv = typeof import.meta !== "undefined" ? import.meta.env : {};
 const envApi = runtimeEnv.API_BASE || buildEnv.VITE_API_BASE || buildEnv.VITE_API_URL || "";

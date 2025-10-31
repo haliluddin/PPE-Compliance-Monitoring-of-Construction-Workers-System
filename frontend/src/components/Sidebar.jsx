@@ -1,104 +1,109 @@
 // frontend/src/components/Sidebar.jsx
-import { useEffect, useState } from "react";
-import API from "../api";
-import { NavLink, useNavigate } from "react-router-dom";
-import { FiCamera, FiBell, FiAlertTriangle, FiUsers, FiFileText, FiMenu, FiLogOut } from "react-icons/fi";
+import React, { useEffect } from "react";
+import { NavLink } from "react-router-dom";
+import { LuBellRing, LuHome, LuCamera, LuUsers, LuFileText } from "react-icons/lu";
 import { useUnread } from "../context/UnreadContext";
 import { WS_BASE } from "../config";
 
 export default function Sidebar() {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const navigate = useNavigate();
   const { unreadCount, setUnreadCount } = useUnread();
 
-  // Fetch initial unread count
-  useEffect(() => {
-    API.get("/notifications").then((res) => {
-      const unread = res.data.filter((n) => !n.is_read).length;
-      setUnreadCount(unread);
-    });
-  }, []);
-
-  // WebSocket connection
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) return;
-    
     const wsBaseClean = (WS_BASE || window.location.origin.replace(/^http/, "ws")).replace(/\/+$/, "");
-    const wsUrl = `${wsBaseClean}/ws/notifications?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(wsUrl);
+    const wsUrl = `${wsBaseClean}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    let ws;
 
-    ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-
-    // Only trigger dot if it's a NEW violation
-    if (data.type === "new_violation") {
-      setUnreadCount((prev) => prev + 1);
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (err) {
+      ws = null;
     }
 
-    // Ignore status updates
-    if (data.type === "status_update") {
-      console.log("✅ Status updated, no new notification triggered");
-    }
-};
+    if (!ws) return;
 
+    ws.onopen = () => {
+      // handshake
+    };
 
-    ws.onclose = () => console.log("❌ Notification WS disconnected");
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (!data) return;
+        if (Array.isArray(data)) {
+          const newViolations = data.filter(d => d && (d.violation_id || d.type === "worker_violation")).length;
+          if (newViolations > 0) setUnreadCount((prev) => prev + newViolations);
+        } else {
+          if (data.violation_id || data.type === "worker_violation") {
+            setUnreadCount((prev) => prev + 1);
+          }
+        }
+      } catch (e) {
+        // ignore non-json or ack
+      }
+    };
 
-    return () => ws.close();
-  }, []);
+    ws.onerror = () => {};
+    ws.onclose = () => {};
 
-  const handleLogout = () => navigate("/");
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        setUnreadCount((c) => c); // keep unchanged but gives hook a chance to sync UI
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
 
-  const menuItems = [
-    { name: "Camera", path: "/camera", icon: <FiCamera size={20} /> },
-    { name: "Notifications", path: "/notifications", icon: <FiBell size={20} /> },
-    { name: "Incidents", path: "/incidents", icon: <FiAlertTriangle size={20} /> },
-    { name: "Workers", path: "/workers", icon: <FiUsers size={20} /> },
-    { name: "Reports", path: "/reports", icon: <FiFileText size={20} /> },
-  ];
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      try {
+        ws.close();
+      } catch (e) {}
+    };
+  }, [setUnreadCount]);
+
+  const linkClass = ({ isActive }) =>
+    `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive ? "bg-[#19325C] text-white" : "text-gray-300 hover:bg-[#2A2B30]"}`;
 
   return (
-    <div className={`flex flex-col sticky top-0 z-40 text-white h-screen transition-all duration-300
-      ${isCollapsed ? "w-20" : "w-64"} bg-[#19325C] relative`}
-    >
-      <div className="absolute inset-0 backdrop-blur-sm bg-black/40 pointer-events-none"></div>
-      <div className="relative z-10 flex flex-col h-full">
-        <div className="flex items-center justify-between p-4">
-          {!isCollapsed && <h1 className="text-2xl font-bold text-white">SafetySite</h1>}
-          <button onClick={() => setIsCollapsed(!isCollapsed)} className="text-white">
-            <FiMenu size={24} />
-          </button>
-        </div>
-
-        <nav className="flex-1 mt-4">
-          {menuItems.map((item) => (
-            <NavLink
-              key={item.name}
-              to={item.path}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 text-lg hover:bg-white/20 transition rounded-lg m-2 ${isActive ? "bg-white/40" : ""}`
-              }
-            >
-              <div className="relative">
-                {item.icon}
-                {item.name === "Notifications" && unreadCount > 0 && (
-                  <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-[#19325C]" />
-                )}
-              </div>
-              {!isCollapsed && <span>{item.name}</span>}
-            </NavLink>
-          ))}
-        </nav>
-
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 px-4 py-3 text-lg hover:bg-white/20 transition rounded-lg m-2 text-white mb-4"
-        >
-          <FiLogOut size={20} />
-          {!isCollapsed && <span>Logout</span>}
-        </button>
+    <aside className="w-64 bg-[#111215] min-h-screen p-4 border-r border-gray-800">
+      <div className="mb-6 px-2">
+        <h2 className="text-xl font-bold text-white">Safety Monitor</h2>
+        <p className="text-xs text-gray-400">Realtime site monitoring</p>
       </div>
-    </div>
+
+      <nav className="flex flex-col space-y-2">
+        <NavLink to="/camera" className={linkClass}>
+          <LuCamera />
+          <span>Camera</span>
+        </NavLink>
+
+        <NavLink to="/notifications" className={linkClass}>
+          <div className="relative flex items-center">
+            <LuBellRing />
+            {unreadCount > 0 && (
+              <span className="absolute -top-2 -right-6 inline-flex items-center justify-center px-2 py-0.5 text-xs font-semibold rounded-full bg-red-500 text-white">
+                {unreadCount}
+              </span>
+            )}
+          </div>
+          <span>Notifications</span>
+        </NavLink>
+
+        <NavLink to="/incidents" className={linkClass}>
+          <LuHome />
+          <span>Incidents</span>
+        </NavLink>
+
+        <NavLink to="/workers" className={linkClass}>
+          <LuUsers />
+          <span>Workers</span>
+        </NavLink>
+
+        <NavLink to="/reports" className={linkClass}>
+          <LuFileText />
+          <span>Reports</span>
+        </NavLink>
+      </nav>
+    </aside>
   );
 }

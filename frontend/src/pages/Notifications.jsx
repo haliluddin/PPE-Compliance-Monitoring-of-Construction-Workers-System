@@ -1,3 +1,4 @@
+// frontend/src/pages/Notifications.jsx
 import { useEffect, useState } from "react";
 import API from "../api";
 import { FaExclamationCircle } from "react-icons/fa";
