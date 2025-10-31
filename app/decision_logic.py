@@ -6,6 +6,7 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_MAX_THREADS", "1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
+
 import cv2
 import re
 import time
@@ -13,18 +14,20 @@ import numpy as np
 from collections import defaultdict
 from tritonclient.http import InferInput, InferRequestedOutput
 from threading import Lock
-PPE_CLASS_IDS = [0, 1, 2, 3]
+
+PPE_CLASS_IDS = [0, 1, 3, 4]
 VIS_THRESH = 0.3
 CROP_PAD = 0.12
+
 _mp_lock = Lock()
 _mp_pose = None
 _pose_instance = None
 _left_indices = None
 _right_indices = None
-PPE_LABELS = {0: "GLOVE", 1: "HELMET", 2: "SHOE", 3: "VEST"}
-PPE_COLORS = {0: (200, 100, 200), 1: (10, 200, 200), 2: (180, 120, 40), 3: (240, 180, 30)}
-IMPROPER_IOU_THRESH = 0.25
-MIN_HEAD_IOU = 0.05
+
+PPE_LABELS = {0: "GLOVE", 1: "HELMET", 3: "SHOE", 4: "VEST"}
+PPE_COLORS = {0: (200, 100, 200), 1: (10, 200, 200), 3: (180, 120, 40), 4: (240, 180, 30)}
+
 def _init_mp_pose():
     global _mp_pose, _left_indices, _right_indices
     if _mp_pose is not None:
@@ -44,6 +47,7 @@ def _init_mp_pose():
             return _mp_pose
         except Exception:
             return None
+
 def init_pose():
     global _pose_instance
     if _pose_instance is not None:
@@ -60,19 +64,23 @@ def init_pose():
             return _pose_instance
         except Exception:
             return None
+
 def get_pose_instance():
     return init_pose()
+
 def iou(A, B):
     xA = max(A[0], B[0]); yA = max(A[1], B[1]); xB = min(A[2], B[2]); yB = min(A[3], B[3])
     interW = max(0.0, xB - xA); interH = max(0.0, yB - yA); inter = interW * interH
     aA = max(0.0, A[2] - A[0]) * max(0.0, A[3] - A[1]); aB = max(0.0, B[2] - B[0]) * max(0.0, B[3] - B[1])
     u = aA + aB - inter
     return inter / u if u > 0 else 0.0
+
 def expand_bbox(b, w, h, pad=CROP_PAD):
     x1, y1, x2, y2 = b
     ww = x2 - x1; hh = y2 - y1
     pad_px = int(max(ww, hh) * pad)
     return max(0, int(x1) - pad_px), max(0, int(y1) - pad_px), min(w - 1, int(x2) + pad_px), min(h - 1, int(y2) + pad_px)
+
 def parse_triton_outputs(outputs, H, W):
     out = {cid: [] for cid in PPE_CLASS_IDS}
     people = []
@@ -121,13 +129,15 @@ def parse_triton_outputs(outputs, H, W):
                 if cls in PPE_CLASS_IDS:
                     out[cls].append((x1c, y1c, x2c, y2c, final_conf))
     return out, people
+
 def abs_lm(landmarks, idx, xoff, yoff, cw, ch):
     lm = landmarks.landmark[idx]
     return (xoff + lm.x * cw, yoff + lm.y * ch, getattr(lm, "visibility", 0.0))
+
 def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
     mp_pose = _init_mp_pose()
     LM = mp_pose.PoseLandmark if mp_pose is not None else None
-    flags = {"helmet": False, "vest": False, "left_glove": False, "right_glove": False, "left_shoe": False, "right_shoe": False, "improper_helmet": False, "improper_vest": False, "improper_left_glove": False, "improper_right_glove": False, "improper_left_shoe": False, "improper_right_shoe": False}
+    flags = {"helmet": False, "vest": False, "left_glove": False, "right_glove": False, "left_shoe": False, "right_shoe": False}
     head_pts = []
     if LM is not None:
         candidates = [LM.NOSE.value, LM.LEFT_EYE.value, LM.RIGHT_EYE.value, LM.LEFT_EAR.value, LM.RIGHT_EAR.value]
@@ -142,10 +152,8 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
             head_pts.append((xoff + lm.x * cw, yoff + lm.y * ch))
     if head_pts:
         hx = int(np.mean([p[0] for p in head_pts])); hy = int(np.mean([p[1] for p in head_pts]))
-        head_visible = True
     else:
         hx = int((person_bbox[0] + person_bbox[2]) / 2); hy = int(person_bbox[1] + (person_bbox[3] - person_bbox[1]) * 0.12)
-        head_visible = False
     try:
         lwx, lwy, lwv = abs_lm(landmarks, LM.LEFT_WRIST.value, xoff, yoff, cw, ch) if LM is not None else (0, 0, 0)
         rwx, rwy, rwv = abs_lm(landmarks, LM.RIGHT_WRIST.value, xoff, yoff, cw, ch) if LM is not None else (0, 0, 0)
@@ -166,24 +174,20 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
         lsx = rsx = lhx = rhx = lsy = rsy = lhy = rhy = None; lsv = rsv = lhv = rhv = 0.0
     glove_boxes = boxes_by_class.get(0, [])
     helmet_boxes = boxes_by_class.get(1, [])
-    shoe_boxes = boxes_by_class.get(2, [])
-    vest_boxes = boxes_by_class.get(3, [])
+    shoe_boxes = boxes_by_class.get(3, [])
+    vest_boxes = boxes_by_class.get(4, [])
     wrist_radius = max(16, int((person_bbox[2] - person_bbox[0]) * 0.04))
     if lwv >= VIS_THRESH:
         wb = (lwx - wrist_radius, lwy - wrist_radius, lwx + wrist_radius, lwy + wrist_radius)
         for bx in glove_boxes:
             if iou(wb, (bx[0], bx[1], bx[2], bx[3])) > 0.02:
                 flags["left_glove"] = True
-                if iou(wb, (bx[0], bx[1], bx[2], bx[3])) < IMPROPER_IOU_THRESH:
-                    flags["improper_left_glove"] = True
                 break
     if rwv >= VIS_THRESH:
         wb = (rwx - wrist_radius, rwy - wrist_radius, rwx + wrist_radius, rwy + wrist_radius)
         for bx in glove_boxes:
             if iou(wb, (bx[0], bx[1], bx[2], bx[3])) > 0.02:
                 flags["right_glove"] = True
-                if iou(wb, (bx[0], bx[1], bx[2], bx[3])) < IMPROPER_IOU_THRESH:
-                    flags["improper_right_glove"] = True
                 break
     ankle_radius = max(20, int((person_bbox[3] - person_bbox[1]) * 0.05))
     if lav >= 0.05:
@@ -191,27 +195,20 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
         for bx in shoe_boxes:
             if iou(ab, (bx[0], bx[1], bx[2], bx[3])) > 0.02:
                 flags["left_shoe"] = True
-                if iou(ab, (bx[0], bx[1], bx[2], bx[3])) < IMPROPER_IOU_THRESH:
-                    flags["improper_left_shoe"] = True
                 break
     if rav >= 0.05:
         ab = (rax - ankle_radius, ray - ankle_radius, rax + ankle_radius, ray + ankle_radius)
         for bx in shoe_boxes:
             if iou(ab, (bx[0], bx[1], bx[2], bx[3])) > 0.02:
                 flags["right_shoe"] = True
-                if iou(ab, (bx[0], bx[1], bx[2], bx[3])) < IMPROPER_IOU_THRESH:
-                    flags["improper_right_shoe"] = True
                 break
     head_w = max(20, (person_bbox[2] - person_bbox[0]) * 0.25); head_h = max(20, (person_bbox[3] - person_bbox[1]) * 0.18)
     head_box = (hx - head_w, hy - head_h, hx + head_w, hy + head_h)
-    if head_pts:
-        for bx in helmet_boxes:
-            if iou(head_box, (bx[0], bx[1], bx[2], bx[3])) > MIN_HEAD_IOU:
-                flags["helmet"] = True
-                if iou(head_box, (bx[0], bx[1], bx[2], bx[3])) < IMPROPER_IOU_THRESH:
-                    flags["improper_helmet"] = True
-                break
-    if lsx is not None and rsx is not None and lsy is not None and rsy is not None:
+    for bx in helmet_boxes:
+        if iou(head_box, (bx[0], bx[1], bx[2], bx[3])) > 0.05:
+            flags["helmet"] = True
+            break
+    if lsx is not None:
         xs = [p for p in [lsx, rsx, lhx, rhx] if p is not None]
         ys = [p for p in [lsy, rsy, lhy, rhy] if p is not None]
         if xs and ys:
@@ -222,8 +219,6 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
             for bx in vest_boxes:
                 if iou((tx1, ty1, tx2, ty2), (bx[0], bx[1], bx[2], bx[3])) > 0.05:
                     flags["vest"] = True
-                    if iou((tx1, ty1, tx2, ty2), (bx[0], bx[1], bx[2], bx[3])) < IMPROPER_IOU_THRESH:
-                        flags["improper_vest"] = True
                     break
     else:
         cx = int((person_bbox[0] + person_bbox[2]) / 2); cy = int((person_bbox[1] + person_bbox[3]) / 2)
@@ -231,10 +226,9 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
         for bx in vest_boxes:
             if iou(cb, (bx[0], bx[1], bx[2], bx[3])) > 0.05:
                 flags["vest"] = True
-                if iou(cb, (bx[0], bx[1], bx[2], bx[3])) < IMPROPER_IOU_THRESH:
-                    flags["improper_vest"] = True
                 break
     return flags
+
 def draw_pose(frame, landmarks, xoff, yoff, cw, ch):
     mp_pose = _init_mp_pose()
     if mp_pose is None:
@@ -262,6 +256,7 @@ def draw_pose(frame, landmarks, xoff, yoff, cw, ch):
             col = (200, 200, 200)
         cv2.circle(frame, (cx, cy), 6, (255, 255, 255), -1, lineType=cv2.LINE_AA)
         cv2.circle(frame, (cx, cy), 4, col, -1, lineType=cv2.LINE_AA)
+
 def detect_torso(ocr_reader, crop, regset):
     if crop is None or crop.size == 0:
         return None, None, 0.0
@@ -295,6 +290,7 @@ def detect_torso(ocr_reader, crop, regset):
     if best is None:
         return None, None, 0.0
     return best, best_txt, best_conf
+
 def process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=None, ocr_reader=None, regset=None, pose_instance=None, person_boxes=None):
     H, W = frame.shape[:2]
     if triton_outputs is None and triton_client is not None and triton_model_name is not None and input_name is not None and output_names is not None:
@@ -334,35 +330,18 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         if res_pose and getattr(res_pose, "pose_landmarks", None):
             draw_pose(annotated, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
             flags = check_ppe(boxes_by_class, person_bbox, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
-            if flags.get("helmet") is False and flags.get("improper_helmet") is False:
-                if getattr(res_pose.pose_landmarks.landmark[0], "visibility", 0.0) >= 0.0 and any(getattr(lm, "visibility", 0.0) >= VIS_THRESH for lm in [res_pose.pose_landmarks.landmark[i] for i in [res_pose.pose_landmarks.landmark[0].__class__.value if hasattr(res_pose.pose_landmarks.landmark[0].__class__, 'value') else 0]]):
-                    violations.append("NO HELMET")
-            if flags.get("vest") is False:
+            if not flags["helmet"]:
+                violations.append("NO HELMET")
+            if not flags["vest"]:
                 violations.append("NO VEST")
-            if not flags.get("left_glove"):
-                if getattr(res_pose.pose_landmarks.landmark[0], "visibility", 0.0) >= 0.0:
-                    violations.append("NO LEFT GLOVE")
-            if not flags.get("right_glove"):
-                if getattr(res_pose.pose_landmarks.landmark[0], "visibility", 0.0) >= 0.0:
-                    violations.append("NO RIGHT GLOVE")
-            if not flags.get("left_shoe"):
-                if getattr(res_pose.pose_landmarks.landmark[0], "visibility", 0.0) >= 0.0:
-                    violations.append("NO LEFT SHOE")
-            if not flags.get("right_shoe"):
-                if getattr(res_pose.pose_landmarks.landmark[0], "visibility", 0.0) >= 0.0:
-                    violations.append("NO RIGHT SHOE")
-            if flags.get("improper_helmet"):
-                violations.append("IMPROPER HELMET")
-            if flags.get("improper_vest"):
-                violations.append("IMPROPER VEST")
-            if flags.get("improper_left_glove"):
-                violations.append("IMPROPER LEFT GLOVE")
-            if flags.get("improper_right_glove"):
-                violations.append("IMPROPER RIGHT GLOVE")
-            if flags.get("improper_left_shoe"):
-                violations.append("IMPROPER LEFT SHOE")
-            if flags.get("improper_right_shoe"):
-                violations.append("IMPROPER RIGHT SHOE")
+            if not flags["left_glove"]:
+                violations.append("NO LEFT GLOVE")
+            if not flags["right_glove"]:
+                violations.append("NO RIGHT GLOVE")
+            if not flags["left_shoe"]:
+                violations.append("NO LEFT SHOE")
+            if not flags["right_shoe"]:
+                violations.append("NO RIGHT SHOE")
             if ocr_reader is not None:
                 mp_pose = _init_mp_pose()
                 LM = mp_pose.PoseLandmark if mp_pose is not None else None
@@ -395,7 +374,7 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                     if mid is not None:
                         matched_id = mid
         else:
-            vest_boxes = boxes_by_class.get(3, [])
+            vest_boxes = boxes_by_class.get(4, [])
             helmet_boxes = boxes_by_class.get(1, [])
             if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.03 for (bx1, by1, bx2, by2, _) in vest_boxes):
                 violations.append("NO VEST")

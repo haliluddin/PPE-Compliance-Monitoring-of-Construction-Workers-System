@@ -12,7 +12,7 @@ import json
 import threading
 from urllib.parse import urlparse
 from datetime import datetime
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -22,15 +22,11 @@ import redis
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
 from app.database import SessionLocal
-from app.models import Job, Camera, Violation, User
+from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
-from app.router.auth import verify_token
 import base64
-from collections import deque
-
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,49 +34,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 try:
     from app.router.auth import router as auth_router
     app.include_router(auth_router)
 except Exception:
     pass
-
 try:
     from app.router.workers import router as workers_router
     app.include_router(workers_router)
 except Exception:
     pass
-
-try:
-    from app.router.cameras import router as cameras_router
-    app.include_router(cameras_router)
-except Exception:
-    pass
-
-try:
-    from app.router.violations import router as violations_router
-    app.include_router(violations_router)
-except Exception:
-    pass
-
-try:
-    from app.router.notifications import router as notifications_router
-    app.include_router(notifications_router)
-except Exception:
-    pass
-
-try:
-    from app.router.notifications_ws import router as notifications_ws_router
-    app.include_router(notifications_ws_router)
-except Exception:
-    pass
-
-try:
-    from app.router.reports import router as reports_router
-    app.include_router(reports_router)
-except Exception:
-    pass
-
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
@@ -100,12 +63,6 @@ STREAM_THREADS = {}
 STREAM_EVENTS = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
-
-PROCESS_QUEUE = deque()
-PROCESS_QUEUE_LOCK = threading.Lock()
-PROCESS_WORKERS = {}
-PROCESS_WORKER_COUNT = int(os.environ.get("PROCESS_WORKER_COUNT", "2"))
-
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -114,7 +71,6 @@ def sanitize_triton_url(url: str) -> str:
         p = urlparse(url)
         return p.netloc or p.path
     return url
-
 def load_model_metadata(client, model_name):
     try:
         meta = client.get_model_metadata(model_name)
@@ -125,71 +81,6 @@ def load_model_metadata(client, model_name):
         return {'input_name': input_name, 'output_names': output_names}
     except Exception:
         return {'input_name': None, 'output_names': []}
-
-def _get_user_id_from_request(request: Request):
-    try:
-        auth = request.headers.get("Authorization", "") or ""
-    except Exception:
-        auth = ""
-    if not auth:
-        token = None
-    else:
-        if auth.startswith("Bearer "):
-            token = auth.split(" ", 1)[1]
-        else:
-            token = auth
-    if not token:
-        return None
-    try:
-        payload = verify_token(token)
-        sub = payload.get("sub")
-        if sub is not None:
-            try:
-                return int(sub)
-            except Exception:
-                return None
-    except Exception:
-        return None
-    return None
-
-def _get_or_create_fallback_user_id():
-    sess = SessionLocal()
-    try:
-        user = sess.query(User).first()
-        if user:
-            return user.id
-        default = User(name="admin", email="admin@example.com", hashed_password="", is_supervisor=True)
-        sess.add(default)
-        sess.commit()
-        sess.refresh(default)
-        return default.id
-    finally:
-        sess.close()
-
-def processing_worker(worker_idx: int):
-    global PROCESS_QUEUE, redis_sync
-    while True:
-        item = None
-        with PROCESS_QUEUE_LOCK:
-            if PROCESS_QUEUE:
-                item = PROCESS_QUEUE.popleft()
-        if item is None:
-            time.sleep(0.01)
-            continue
-        try:
-            img_bytes, meta = item.get("img_bytes"), item.get("meta")
-            try:
-                process_image(img_bytes, meta)
-            except Exception:
-                try:
-                    b64 = base64.b64encode(img_bytes).decode("ascii")
-                    process_image_task.delay(b64, meta)
-                    TASKS_QUEUED.inc()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
 @app.on_event("startup")
 def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
@@ -241,11 +132,6 @@ def startup_event():
         redis_pubsub = None
     APP_LOOP = asyncio.get_event_loop()
     asyncio.create_task(redis_subscriber_task())
-    for i in range(PROCESS_WORKER_COUNT):
-        t = threading.Thread(target=processing_worker, args=(i,), daemon=True)
-        t.start()
-        PROCESS_WORKERS[i] = t
-
 @app.on_event("shutdown")
 def shutdown_event():
     global triton, redis_pubsub
@@ -267,11 +153,9 @@ def shutdown_event():
             evt.set()
         except Exception:
             pass
-
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -291,7 +175,6 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
-
 async def redis_subscriber_task():
     global redis_pubsub
     if redis_pubsub is None:
@@ -318,24 +201,20 @@ async def redis_subscriber_task():
         except Exception:
             await asyncio.sleep(0.1)
         await asyncio.sleep(0.01)
-
 @app.post("/jobs")
-def create_job(payload: dict, request: Request):
+def create_job(payload: dict):
     sess = SessionLocal()
     try:
-        uid = _get_user_id_from_request(request)
-        user_id = uid if uid else _get_or_create_fallback_user_id()
         job_type = payload.get("job_type", "video")
         camera_id = payload.get("camera_id")
         meta = payload.get("meta", {})
-        job = Job(job_type=job_type, camera_id=camera_id, status="queued", meta=meta, user_id=user_id)
+        job = Job(job_type=job_type, camera_id=camera_id, status="queued", meta=meta)
         sess.add(job)
         sess.commit()
         sess.refresh(job)
         return {"job_id": job.id, "status": job.status}
     finally:
         sess.close()
-
 def process_video_file(job_id: int, filepath: str, camera_id=None):
     cap = cv2.VideoCapture(filepath)
     frame_idx = 0
@@ -353,23 +232,31 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 break
             if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
                 try:
-                    h, w = frame.shape[:2]
-                    max_w = int(os.environ.get("REALTIME_MAX_WIDTH", "640"))
-                    if w > max_w:
-                        scale = max_w / w
-                        new_w = int(w * scale)
-                        new_h = int(h * scale)
-                        frame_small = cv2.resize(frame, (new_w, new_h))
-                    else:
-                        frame_small = frame
-                    _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), int(os.environ.get("REALTIME_JPEG_Q", "60"))])
+                    _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     img_bytes = jpg.tobytes()
                 except Exception:
                     frame_idx += 1
                     continue
                 meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-                with PROCESS_QUEUE_LOCK:
-                    PROCESS_QUEUE.append({"img_bytes": img_bytes, "meta": meta})
+                img_b64 = base64.b64encode(img_bytes).decode("ascii")
+                if USE_CELERY:
+                    try:
+                        process_image_task.delay(img_b64, meta)
+                        TASKS_QUEUED.inc()
+                    except Exception:
+                        try:
+                            process_image(img_bytes, meta)
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        process_image(img_bytes, meta)
+                    except Exception:
+                        try:
+                            process_image_task.delay(img_b64, meta)
+                            TASKS_QUEUED.inc()
+                        except Exception:
+                            pass
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -389,7 +276,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
         except Exception:
             pass
         sess.close()
-
 @app.post("/jobs/{job_id}/upload")
 async def upload_job_video(job_id: int, file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     INFER_REQUESTS.inc()
@@ -414,13 +300,10 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         STREAM_THREADS[job_id] = thread
         thread.start()
         return {"status": "accepted", "job_id": job_id}
-
 class StreamStart(BaseModel):
-    rtsp_url: str = None
-    stream_url: str = None
+    rtsp_url: str
     camera_id: int = None
     job_id: int = None
-
 def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threading.Event = None):
     cap = cv2.VideoCapture(rtsp_url)
     frame_idx = 0
@@ -440,24 +323,28 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             if not ret:
                 time.sleep(0.05)
                 continue
-            try:
-                h, w = frame.shape[:2]
-                max_w = int(os.environ.get("REALTIME_MAX_WIDTH", "640"))
-                if w > max_w:
-                    scale = max_w / w
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
-                    frame_small = cv2.resize(frame, (new_w, new_h))
-                else:
-                    frame_small = frame
-                _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), int(os.environ.get("REALTIME_JPEG_Q", "60"))])
-                img_bytes = jpg.tobytes()
-            except Exception:
-                frame_idx += 1
-                continue
+            _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            img_bytes = jpg.tobytes()
             meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-            with PROCESS_QUEUE_LOCK:
-                PROCESS_QUEUE.append({"img_bytes": img_bytes, "meta": meta})
+            img_b64 = base64.b64encode(img_bytes).decode("ascii")
+            if USE_CELERY:
+                try:
+                    process_image_task.delay(img_b64, meta)
+                    TASKS_QUEUED.inc()
+                except Exception:
+                    try:
+                        process_image(img_bytes, meta)
+                    except Exception:
+                        pass
+            else:
+                try:
+                    process_image(img_bytes, meta)
+                except Exception:
+                    try:
+                        process_image_task.delay(img_b64, meta)
+                        TASKS_QUEUED.inc()
+                    except Exception:
+                        pass
             frame_idx += 1
         if job:
             job.status = "completed"
@@ -469,72 +356,27 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
         except Exception:
             pass
         sess.close()
-
 @app.post("/streams")
-def start_stream(payload: StreamStart, request: Request):
-    rtsp_url = payload.rtsp_url or payload.stream_url
+def start_stream(payload: StreamStart):
+    rtsp_url = payload.rtsp_url
     camera_id = payload.camera_id
     job_id = payload.job_id
     if job_id is None:
         sess = SessionLocal()
         try:
-            uid = _get_user_id_from_request(request)
-            user_id = uid if uid else _get_or_create_fallback_user_id()
-            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url}, user_id=user_id)
+            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"rtsp_url": rtsp_url})
             sess.add(job)
             sess.commit()
             sess.refresh(job)
             job_id = job.id
         finally:
             sess.close()
-    if camera_id:
-        sess2 = SessionLocal()
-        try:
-            cam = sess2.query(Camera).filter(Camera.id == camera_id).first()
-            if cam:
-                cam.stream_url = rtsp_url
-                if getattr(cam, "user_id", None) is None:
-                    cam.user_id = _get_or_create_fallback_user_id()
-                sess2.commit()
-        finally:
-            sess2.close()
     stop_event = threading.Event()
     STREAM_EVENTS[job_id] = stop_event
     thread = threading.Thread(target=stream_loop, args=(job_id, rtsp_url, camera_id, stop_event), daemon=True)
     STREAM_THREADS[job_id] = thread
     thread.start()
     return {"job_id": job_id, "status": "started"}
-
-@app.post("/streams/test")
-def test_stream(payload: dict = Body(...)):
-    url = payload.get("url") or payload.get("stream_url") or payload.get("rtsp_url")
-    if not url:
-        return {"ok": False, "error": "missing url"}
-    cap = None
-    start = time.time()
-    try:
-        cap = cv2.VideoCapture(url)
-        deadline = start + 6.0
-        while time.time() < deadline:
-            if not cap or not cap.isOpened():
-                time.sleep(0.2)
-                continue
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
-                b64 = base64.b64encode(jpg.tobytes()).decode("ascii")
-                return {"ok": True, "preview_jpeg_b64": b64}
-            time.sleep(0.1)
-        return {"ok": False, "error": "timeout opening stream or no frames read"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-    finally:
-        try:
-            if cap:
-                cap.release()
-        except Exception:
-            pass
-
 @app.post("/streams/{job_id}/stop")
 def stop_stream(job_id: int):
     evt = STREAM_EVENTS.get(job_id)
@@ -556,7 +398,6 @@ def stop_stream(job_id: int):
     finally:
         sess.close()
     return {"job_id": job_id, "status": "stopped"}
-
 @app.post("/infer")
 async def infer(file: UploadFile = File(...), camera_id: int = None, job_id: int = None):
     INFER_REQUESTS.inc()
@@ -588,7 +429,6 @@ async def infer(file: UploadFile = File(...), camera_id: int = None, job_id: int
                 return {"task_id": task.id, "status": "queued"}
             except Exception:
                 raise HTTPException(status_code=500, detail="processing failed")
-
 @app.post("/infer_sync")
 async def infer_sync(file: UploadFile = File(...)):
     INFER_REQUESTS.inc()
@@ -614,7 +454,6 @@ async def infer_sync(file: UploadFile = File(...)):
     res = triton.infer(TRITON_MODEL, inputs=[inp], outputs=outputs)
     results = {n: res.as_numpy(n).tolist() for n in output_names}
     return {"model": TRITON_MODEL, "outputs": results}
-
 @app.get("/jobs/{job_id}/status")
 def job_status(job_id: int):
     sess = SessionLocal()
@@ -625,7 +464,6 @@ def job_status(job_id: int):
         return {"job_id": job.id, "status": job.status, "meta": job.meta, "created_at": job.created_at, "started_at": job.started_at, "finished_at": job.finished_at}
     finally:
         sess.close()
-
 @app.get("/violations")
 def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
     sess = SessionLocal()
@@ -643,96 +481,62 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
                 "worker_code": r.worker_code,
                 "violation_types": r.violation_types,
                 "frame_index": r.frame_index,
-                "created_at": r.created_at
+                "created_at": r.created_at,
+                "status": getattr(r, "status", "Pending")
             })
-        return {"violations": out}
+        return out
     finally:
         sess.close()
-
-@app.post("/cameras")
-def create_camera(payload: dict, request: Request):
-    sess = SessionLocal()
-    try:
-        uid = _get_user_id_from_request(request)
-        user_id = uid if uid else _get_or_create_fallback_user_id()
-        name = payload.get("name") if isinstance(payload, dict) else None
-        location = payload.get("location") if isinstance(payload, dict) else None
-        stream_url = payload.get("stream_url") if isinstance(payload, dict) else None
-        cam = Camera(name=name or "Camera", location=location or "", stream_url=stream_url or None, user_id=user_id)
-        sess.add(cam)
-        sess.commit()
-        sess.refresh(cam)
-        return {"camera_id": cam.id, "name": cam.name, "location": cam.location, "stream_url": cam.stream_url}
-    finally:
-        sess.close()
-
-@app.get("/cameras")
-def list_cameras():
-    sess = SessionLocal()
-    try:
-        rows = sess.query(Camera).order_by(Camera.id.asc()).all()
-        out = []
-        for r in rows:
-            out.append({"id": r.id, "name": r.name, "location": r.location, "stream_url": r.stream_url, "created_at": r.created_at})
-        return {"cameras": out}
-    finally:
-        sess.close()
-
 @app.get("/health")
 def health():
     if os.environ.get("ALLOW_NO_TRITON","1") in ("1","true","True"):
         return {"triton_ready": True, "note": "Triton not present; local processing allowed"}
     ready = triton is not None
     return {"triton_ready": ready}
-
-def persist_violation_to_db_and_publish(worker_code: str, camera_id: int, camera_location: str, detection_meta: dict):
+@app.get("/notifications")
+def get_notifications(limit: int = 100, offset: int = 0):
     sess = SessionLocal()
     try:
-        v = Violation(
-            job_id=detection_meta.get("job_id"),
-            camera_id=camera_id,
-            worker_code=worker_code,
-            violation_types=detection_meta.get("violation_types") or detection_meta.get("type") or "unknown",
-            frame_index=detection_meta.get("frame_idx"),
-            created_at=datetime.utcnow()
-        )
-        sess.add(v)
-        sess.commit()
-        sess.refresh(v)
-        payload = {
-            "id": v.id,
-            "violation_id": v.id,
-            "worker_code": worker_code,
-            "violation_type": v.violation_types,
-            "camera": camera_location or f"camera:{camera_id}",
-            "camera_location": camera_location or "",
-            "status": getattr(v, "status", "pending"),
-            "created_at": v.created_at.isoformat(),
-            "thumbnail_b64": detection_meta.get("annotated_jpeg_b64")
-        }
-        try:
-            if redis_sync:
-                redis_sync.publish(WS_CHANNEL, json.dumps(payload, default=str))
-        except Exception:
-            pass
-    except Exception:
-        pass
+        rows = sess.query(Violation).order_by(Violation.id.desc()).offset(offset).limit(limit).all()
+        out = []
+        for r in rows:
+            out.append({
+                "id": r.id,
+                "violation_id": r.id,
+                "worker_name": getattr(r, "worker", None) or getattr(r, "worker_name", None) or "Unknown Worker",
+                "worker_code": getattr(r, "worker_code", None) or "N/A",
+                "violation_type": getattr(r, "violation_types", None) or "Unknown Violation",
+                "camera": getattr(r, "camera_name", None) or getattr(r, "camera_id", None) or "Unknown Camera",
+                "camera_location": getattr(r, "camera_location", None) or "",
+                "created_at": r.created_at,
+                "is_read": getattr(r, "is_read", False),
+                "status": getattr(r, "status", "Pending"),
+                "type": "worker_violation"
+            })
+        return out
     finally:
         sess.close()
-
-def record_and_publish_violation_if_persistent(worker_code: str, camera_id: int, camera_location: str, detection_meta: dict):
-    global redis_sync
-    if redis_sync is None:
-        persist_violation_to_db_and_publish(worker_code, camera_id, camera_location, detection_meta)
-        return
-    key = f"detp:{worker_code}:{camera_id}"
-    threshold = int(os.environ.get("DETECTION_PERSIST_THRESHOLD", "3"))
-    ttl = int(os.environ.get("DETECTION_PERSIST_TTL", "5"))
+@app.post("/notifications/{notif_id}/mark_read")
+def mark_notification_read(notif_id: int):
+    sess = SessionLocal()
     try:
-        cnt = redis_sync.incr(key)
-        redis_sync.expire(key, ttl)
-        if cnt >= threshold:
-            redis_sync.delete(key)
-            persist_violation_to_db_and_publish(worker_code, camera_id, camera_location, detection_meta)
-    except Exception:
-        persist_violation_to_db_and_publish(worker_code, camera_id, camera_location, detection_meta)
+        v = sess.query(Violation).filter(Violation.id == notif_id).first()
+        if not v:
+            raise HTTPException(status_code=404, detail="notification not found")
+        if hasattr(v, "is_read"):
+            v.is_read = True
+            sess.commit()
+        return {"ok": True}
+    finally:
+        sess.close()
+@app.get("/cameras")
+def list_cameras():
+    sess = SessionLocal()
+    try:
+        cams = sess.query(Camera).all() if 'Camera' in globals() else []
+        out = []
+        for c in cams:
+            out.append({"id": c.id, "name": getattr(c, "name", f"Camera {c.id}"), "location": getattr(c, "location", "")})
+        return out
+    finally:
+        sess.close()

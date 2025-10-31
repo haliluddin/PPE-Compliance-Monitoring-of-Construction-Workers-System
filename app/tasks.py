@@ -16,9 +16,10 @@ import numpy as np
 import logging
 from datetime import datetime
 from threading import Lock
+
 from urllib.parse import urlparse
 
-from app.decision_logic import process_frame, init_pose, detect_torso
+from app.decision_logic import process_frame, init_pose
 from app.database import SessionLocal
 from app.models import Violation, Job, Worker
 
@@ -56,17 +57,9 @@ _TRITON_CLIENT = None
 _REDIS_CLIENT = None
 local_yolo = None
 _local_yolo_lock = Lock()
+
 _OCR_READER = None
 _OCR_LOCK = Lock()
-
-_violation_lock = Lock()
-_violation_start_times = {}
-_violation_last_saved = {}
-_violation_last_cleared = {}
-
-_regset_cache = set()
-_regset_cache_ts = 0.0
-_REGSET_CACHE_TTL = 30.0
 
 def sanitize_triton_url(url: str) -> str:
     if not url:
@@ -198,7 +191,7 @@ def _init_local_yolo():
                     if self.ppe_model is None:
                         return {}
                     try:
-                        results = self.ppe_model.predict(source=frame, conf=self.conf, iou=self.iou, classes=[0,1,2,3], verbose=False)
+                        results = self.ppe_model.predict(source=frame, conf=self.conf, iou=self.iou, classes=[0,1,3,4], verbose=False)
                         if not results:
                             return {}
                         r = results[0]
@@ -366,23 +359,7 @@ def _process_image(image_bytes, meta=None):
             ocr_reader = get_ocr_reader()
         except Exception:
             ocr_reader = None
-        global _regset_cache, _regset_cache_ts
-        now_ts = time.time()
-        if now_ts - _regset_cache_ts > _REGSET_CACHE_TTL:
-            try:
-                reg_sess = SessionLocal()
-                rows = reg_sess.query(Worker.worker_code).all()
-                _regset_cache = set(str(r[0]).strip() for r in rows if r and r[0] is not None)
-                _regset_cache_ts = now_ts
-            except Exception:
-                _regset_cache = _regset_cache or set()
-            finally:
-                try:
-                    reg_sess.close()
-                except Exception:
-                    pass
-        regset = _regset_cache
-        result = process_frame(frame, triton_client=triton, triton_model_name=TRITON_MODEL, ocr_reader=ocr_reader, regset=regset, pose_instance=pose, person_boxes=person_boxes, triton_outputs=triton_out_for_ppe)
+        result = process_frame(frame, triton_client=triton, triton_model_name=TRITON_MODEL, ocr_reader=ocr_reader, regset=set(), pose_instance=pose, person_boxes=person_boxes, triton_outputs=triton_out_for_ppe)
         annotated = None
         if isinstance(result, dict) and "annotated_bgr" in result:
             annotated = result.pop("annotated_bgr")
@@ -401,8 +378,6 @@ def _process_image(image_bytes, meta=None):
         people = result.get("people", [])
         r = get_redis()
         publish_people = []
-        now = time.time()
-        worker_current_violations = {}
         for p in people:
             violations = p.get("violations", [])
             id_label = p.get("id")
@@ -417,126 +392,38 @@ def _process_image(image_bytes, meta=None):
                 worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
                 if worker_obj is not None:
                     worker_id = worker_obj.id
-            current_keys = []
-            for v in violations:
-                key = None
-                txt = v.strip().upper()
-                if txt == "NO HELMET":
-                    key = "no_helmet"
-                elif txt == "NO VEST":
-                    key = "no_vest"
-                elif txt == "NO LEFT GLOVE":
-                    key = "no_left_glove"
-                elif txt == "NO RIGHT GLOVE":
-                    key = "no_right_glove"
-                elif txt == "NO LEFT SHOE":
-                    key = "no_left_shoe"
-                elif txt == "NO RIGHT SHOE":
-                    key = "no_right_shoe"
-                elif txt == "IMPROPER HELMET":
-                    key = "improper_helmet"
-                elif txt == "IMPROPER VEST":
-                    key = "improper_vest"
-                elif txt == "IMPROPER LEFT GLOVE":
-                    key = "improper_left_glove"
-                elif txt == "IMPROPER RIGHT GLOVE":
-                    key = "improper_right_glove"
-                elif txt == "IMPROPER LEFT SHOE":
-                    key = "improper_left_shoe"
-                elif txt == "IMPROPER RIGHT SHOE":
-                    key = "improper_right_shoe"
-                if key:
-                    current_keys.append(key)
-            if worker_code:
-                worker_current_violations[worker_code] = {"keys": current_keys, "worker_obj": worker_obj, "worker_id": worker_id, "id_label": id_label, "p": p}
-            publish_people.append({"bbox": p.get("bbox"), "id": id_label, "violations": violations})
-        with _violation_lock:
-            for wcode, data in worker_current_violations.items():
-                keys = data["keys"]
-                for key in keys:
-                    ktuple = (wcode, key)
-                    if ktuple not in _violation_start_times:
-                        _violation_start_times[ktuple] = now
-                    else:
-                        start = _violation_start_times[ktuple]
-                        duration = now - start
-                        if duration >= 1.0:
-                            last_saved = _violation_last_saved.get(ktuple)
-                            last_cleared = _violation_last_cleared.get(ktuple)
-                            allow_save = False
-                            if last_saved is None:
-                                allow_save = True
+            if violations and worker_obj is not None:
+                snap_bytes = None
+                try:
+                    if annotated is not None:
+                        bbox = p.get("bbox")
+                        if bbox and len(bbox) == 4:
+                            x1, y1, x2, y2 = map(int, bbox)
+                            x1 = max(0, x1); y1 = max(0, y1); x2 = min(frame.shape[1] - 1, x2); y2 = min(frame.shape[0] - 1, y2)
+                            crop = annotated[y1:y2, x1:x2]
+                            if crop is None or crop.size == 0:
+                                _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                                snap_bytes = jpg.tobytes()
                             else:
-                                if last_cleared is not None and last_cleared > last_saved:
-                                    allow_save = True
-                                elif (now - last_saved) >= 180.0:
-                                    allow_save = True
-                                else:
-                                    allow_save = False
-                            if allow_save:
-                                worker_obj = data["worker_obj"]
-                                worker_id = data["worker_id"]
-                                id_label = data["id_label"]
-                                should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
-                                snap_bytes = None
-                                try:
-                                    if annotated is not None:
-                                        bbox = data["p"].get("bbox")
-                                        if bbox and len(bbox) == 4:
-                                            x1, y1, x2, y2 = map(int, bbox)
-                                            x1 = max(0, x1); y1 = max(0, y1); x2 = min(frame.shape[1] - 1, x2); y2 = min(frame.shape[0] - 1, y2)
-                                            crop = annotated[y1:y2, x1:x2]
-                                            if crop is None or crop.size == 0:
-                                                _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                                snap_bytes = jpg.tobytes()
-                                            else:
-                                                _, jpg = cv2.imencode('.jpg', crop, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                                snap_bytes = jpg.tobytes()
-                                        else:
-                                            _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                            snap_bytes = jpg.tobytes()
-                                except Exception:
-                                    try:
-                                        _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                        snap_bytes = jpg.tobytes()
-                                    except Exception:
-                                        snap_bytes = None
-                                vtext = key.replace("_", " ").upper()
-                                inference_json = {"worker": wcode, "key": key, "meta": data["p"]}
-                                if not worker_obj:
-                                    if ocr_reader is not None:
-                                        bbox = data["p"].get("bbox")
-                                        if bbox and len(bbox) == 4:
-                                            x1, y1, x2, y2 = map(int, bbox)
-                                            x1 = max(0, x1); y1 = max(0, y1); x2 = min(frame.shape[1] - 1, x2); y2 = min(frame.shape[0] - 1, y2)
-                                            pc = frame[y1:y2, x1:x2]
-                                            try:
-                                                mid, txt, conf = detect_torso(ocr_reader, pc, regset)
-                                                if mid is not None and not str(mid).startswith("UNREG:"):
-                                                    worker_obj = sess.query(Worker).filter(Worker.worker_code == str(mid)).first()
-                                                    if worker_obj:
-                                                        worker_id = worker_obj.id
-                                                        wcode = str(mid)
-                                            except Exception:
-                                                pass
-                                if should_save_violation:
-                                    v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=wcode, violation_types=vtext, frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow(), status="pending")
-                                    sess.add(v)
-                                    sess.commit()
-                                    sess.refresh(v)
-                                _violation_last_saved[ktuple] = now
-            tracked_keys = list(_violation_start_times.keys())
-            for t in tracked_keys:
-                wcode_t, key_t = t
-                present = False
-                if wcode_t in worker_current_violations and key_t in worker_current_violations[wcode_t]["keys"]:
-                    present = True
-                if not present:
-                    _violation_last_cleared[t] = now
+                                _, jpg = cv2.imencode('.jpg', crop, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                                snap_bytes = jpg.tobytes()
+                        else:
+                            _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                            snap_bytes = jpg.tobytes()
+                except Exception:
                     try:
-                        del _violation_start_times[t]
+                        _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                        snap_bytes = jpg.tobytes()
                     except Exception:
-                        pass
+                        snap_bytes = None
+                inference_json = {"person": p, "boxes_by_class": result.get("boxes_by_class", {})}
+                should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
+                if should_save_violation:
+                    v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=";".join(violations), frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
+                    sess.add(v)
+                    sess.commit()
+                    sess.refresh(v)
+            publish_people.append({"bbox": p.get("bbox"), "id": id_label, "violations": violations})
         annotated_b64 = None
         if annotated is not None:
             try:
