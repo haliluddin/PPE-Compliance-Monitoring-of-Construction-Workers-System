@@ -33,7 +33,7 @@ except Exception:
     InferInput = None
     InferRequestedOutput = None
 from app.database import SessionLocal
-from app.models import Job, Camera, Violation
+from app.models import Job, Camera, Violation, Worker, Notification
 from app.tasks import process_image_task, process_image
 import base64
 log = logging.getLogger("uvicorn.error")
@@ -303,7 +303,7 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 except Exception:
                     frame_idx += 1
                     continue
-                meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time(), "from_upload": True}
                 img_b64 = base64.b64encode(img_bytes).decode("ascii")
                 if USE_CELERY:
                     try:
@@ -574,6 +574,75 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
         return out
     finally:
         sess.close()
+@app.put("/violations/{violation_id}/status")
+def update_violation_status(violation_id: int, payload: dict = Body(...)):
+    sess = SessionLocal()
+    try:
+        v = sess.query(Violation).filter(Violation.id == violation_id).first()
+        if not v:
+            raise HTTPException(status_code=404, detail="violation not found")
+        new_status = payload.get("status")
+        if not new_status:
+            raise HTTPException(status_code=400, detail="status required")
+        v.status = new_status
+        sess.commit()
+        # Publish update to WS/redis
+        msg = {
+            "type": "status_update",
+            "violation_id": v.id,
+            "status": v.status,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        try:
+            if redis_sync is not None:
+                try:
+                    redis_sync.publish(WS_CHANNEL, json.dumps(msg, default=str))
+                except Exception:
+                    pass
+            # Also send to open websockets
+            for ws in list(ws_clients):
+                try:
+                    asyncio.create_task(ws.send_json(msg))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        worker_name = None
+        try:
+            if v.worker is not None:
+                worker_name = getattr(v.worker, "fullName", None) or getattr(v.worker, "name", None)
+        except Exception:
+            worker_name = None
+        if not worker_name:
+            worker_name = getattr(v, "worker_code", None) or "Unknown"
+        snapshot_b64 = None
+        try:
+            if v.snapshot:
+                snapshot_b64 = base64.b64encode(v.snapshot).decode("ascii")
+        except Exception:
+            snapshot_b64 = None
+        camera_name = None
+        camera_location = None
+        try:
+            if v.camera is not None:
+                camera_name = getattr(v.camera, "name", None)
+                camera_location = getattr(v.camera, "location", None)
+        except Exception:
+            camera_name = None
+            camera_location = None
+        if not camera_name and getattr(v, "job", None) is not None and getattr(v.job, "job_type", "") == "video":
+            camera_name = "Video Upload"
+            camera_location = "Video Upload"
+        return {
+            "id": v.id,
+            "status": v.status,
+            "worker_name": worker_name,
+            "snapshot": snapshot_b64,
+            "camera_name": camera_name,
+            "camera_location": camera_location
+        }
+    finally:
+        sess.close()
 @app.get("/health")
 def health():
     if os.environ.get("ALLOW_NO_TRITON","1") in ("1","true","True"):
@@ -609,14 +678,16 @@ def get_notifications(limit: int = 100, offset: int = 0):
                 "id": r.id,
                 "violation_id": r.id,
                 "worker_name": worker_name,
+                "worker_name": worker_name,
                 "worker_code": getattr(r, "worker_code", None) or "N/A",
                 "violation_type": getattr(r, "violation_types", None) or "Unknown Violation",
                 "camera": camera_name,
                 "camera_location": camera_location,
                 "created_at": r.created_at,
-                "is_read": getattr(r, "is_read", False),
+                "is_read": getattr(r, "status", "").lower() == "read" or getattr(r, "is_read", False),
                 "status": getattr(r, "status", "Pending"),
-                "type": "worker_violation"
+                "type": "worker_violation",
+                "snapshot": snapshot_b64
             })
         return out
     finally:

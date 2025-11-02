@@ -4,8 +4,8 @@ import API from "../api";
 import { FaExclamationCircle } from "react-icons/fa";
 import { FiMoreVertical, FiSearch } from "react-icons/fi";
 import { LuBellRing } from "react-icons/lu";
-import { useUnread } from "../context/UnreadContext";
 import ViolationModal from "../components/ViolationModal";
+import { useUnread } from "../context/UnreadContext";
 import { WS_BASE } from "../config";
 
 function playNotificationSound() {
@@ -34,6 +34,15 @@ function playNotificationSound() {
   tryPlay();
 }
 
+const VIOLATION_TYPES = [
+  "No Helmet",
+  "No Right Glove",
+  "No Left Glove",
+  "No Vest",
+  "No Right Shoe",
+  "No Left Shoe"
+];
+
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
   const [openMenu, setOpenMenu] = useState(null);
@@ -43,11 +52,12 @@ export default function Notifications() {
   const [showModal, setShowModal] = useState(false);
   const [selectedViolation, setSelectedViolation] = useState(null);
   const [cameraOptions, setCameraOptions] = useState([]);
-  const violationOptions = ["No Helmet", "No Vest", "No Boots", "No Gloves"];
+  const violationOptions = VIOLATION_TYPES;
   const sortOptions = ["Newest", "Oldest"];
   const [filters, setFilters] = useState({ camera: "", violation: "", sortBy: "Newest" });
 
   useEffect(() => {
+    // unlock/prime audio
     const unlockAudio = () => {
       try {
         const a = new Audio("/notification.mp3");
@@ -85,25 +95,40 @@ export default function Notifications() {
         const res = await API.get("/notifications");
         const raw = res.data;
         const arr = Array.isArray(raw) ? raw : raw?.notifications || raw;
-        const mapped = (arr || []).map((n) => ({
-          id: n.id,
-          violation_id: n.violation_id || n.id,
-          worker: n.worker_name || n.worker || "Unknown Worker",
-          worker_code: n.worker_code || "N/A",
-          violation: n.violation_type || n.violation || n.message || "Unknown Violation",
-          camera: `${n.camera || n.camera_name || "Unknown Camera"} (${n.camera_location || ""})`,
-          camera_name: n.camera || n.camera_name || "Unknown Camera",
-          type: n.type || "worker_violation",
-          date: n.date || (n.created_at ? new Date(n.created_at).toLocaleDateString() : ""),
-          time: n.time || (n.created_at ? new Date(n.created_at).toLocaleTimeString() : ""),
-          isNew: typeof n.is_read !== "undefined" ? !n.is_read : !(n.is_read === true),
-          status: n.status || "Pending",
-        }));
+        const mapped = (arr || []).map((n) => {
+          // normalize worker name to always be a string
+          let workerName = "Unknown Worker";
+          if (n.worker_name) workerName = n.worker_name;
+          else if (n.worker && typeof n.worker === "string") workerName = n.worker;
+          else if (n.worker && typeof n.worker === "object") workerName = n.worker.fullName || n.worker.name || JSON.stringify(n.worker);
+          else if (n.worker_code) workerName = n.worker_code;
+          const cameraName = n.camera_name || n.camera || (n.camera_location ? n.camera_location : "");
+          return {
+            id: n.id,
+            violation_id: n.violation_id || n.id,
+            worker: workerName,
+            worker_code: n.worker_code || "N/A",
+            violation: n.violation_type || n.violation || n.message || "Unknown Violation",
+            camera: cameraName ? `${cameraName} (${n.camera_location || ""})` : cameraName,
+            camera_name: cameraName,
+            type: n.type || "worker_violation",
+            date: n.date || (n.created_at ? new Date(n.created_at).toLocaleDateString() : ""),
+            time: n.time || (n.created_at ? new Date(n.created_at).toLocaleTimeString() : ""),
+            isNew: typeof n.is_read !== "undefined" ? !n.is_read : !(n.is_read === true),
+            status: n.status || "Pending",
+            snapshot: n.snapshot || n.snapshot_b64 || n.snapshot?.base64 || null,
+          };
+        });
         setNotifications(mapped);
       } catch (err) {}
     };
     loadNotifications();
   }, []);
+
+  useEffect(() => {
+    const unread = notifications.filter((n) => n.isNew).length;
+    setUnreadCount(unread);
+  }, [notifications, setUnreadCount]);
 
   useEffect(() => {
     let originalTitle = document.title;
@@ -122,63 +147,65 @@ export default function Notifications() {
   }, [notifications]);
 
   useEffect(() => {
-    const unread = notifications.filter((n) => n.isNew).length;
-    setUnreadCount(unread);
-  }, [notifications, setUnreadCount]);
-
-  useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
     const wsBaseClean = (WS_BASE || window.location.origin.replace(/^http/, "ws")).replace(/\/+$/, "");
     const wsUrl = `${wsBaseClean}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-    const ws = new WebSocket(wsUrl);
-    ws.onopen = () => {};
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        const isNewViolation = data.violation_id && !notifications.some((n) => n.violation_id === data.violation_id);
-        if (isNewViolation) {
-          playNotificationSound();
-          if (Notification.permission === "granted") {
-            new Notification("Violation Detected!", {
-              body: `${data.worker_name || "Unknown Worker"} - ${data.violation_type || data.message}`,
-              icon: "/alert-icon.png",
-            });
-          }
-        }
-        setNotifications((prev) => {
-          if (data.violation_id) {
-            const exists = prev.some((n) => n.violation_id === data.violation_id);
-            if (exists) {
-              return prev.map((n) =>
-                n.violation_id === data.violation_id
-                  ? { ...n, status: data.status || n.status, isNew: isNewViolation ? true : n.isNew }
-                  : n
-              );
-            } else {
-              const newNotification = {
-                id: data.id,
-                violation_id: data.violation_id,
-                worker: data.worker_name || "Unknown Worker",
-                worker_code: data.worker_code || "N/A",
-                violation: data.violation_type || data.message || "Unknown Violation",
-                camera: `${data.camera || "Unknown Camera"} (${data.camera_location || "Unknown Location"})`,
-                camera_name: data.camera || "Unknown Camera",
-                type: "worker_violation",
-                date: new Date(data.created_at).toLocaleDateString(),
-                time: new Date(data.created_at).toLocaleTimeString(),
-                isNew: true,
-                status: data.status || "Pending",
-              };
-              return [newNotification, ...prev];
+    try {
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => {};
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const isNewViolation = data.violation_id && !notifications.some((n) => n.violation_id === data.violation_id);
+          if (isNewViolation) {
+            playNotificationSound();
+            if (Notification.permission === "granted") {
+              new Notification("Violation Detected!", {
+                body: `${data.worker_name || "Unknown Worker"} - ${data.violation_type || data.message}`,
+                icon: "/alert-icon.png",
+              });
             }
           }
-          return prev;
-        });
-      } catch (err) {}
-    };
-    ws.onclose = () => {};
-    return () => ws.close();
+          setNotifications((prev) => {
+            if (data.violation_id) {
+              const exists = prev.some((n) => n.violation_id === data.violation_id);
+              if (exists) {
+                return prev.map((n) =>
+                  n.violation_id === data.violation_id
+                    ? { ...n, status: data.status || n.status, isNew: data.isNew ?? true ? true : n.isNew }
+                    : n
+                );
+              } else {
+                let workerName = data.worker_name || data.worker || data.worker_code || "Unknown Worker";
+                if (typeof workerName === "object") workerName = workerName.fullName || workerName.name || JSON.stringify(workerName);
+                const newNotification = {
+                  id: data.id,
+                  violation_id: data.violation_id,
+                  worker: workerName,
+                  worker_code: data.worker_code || "N/A",
+                  violation: data.violation_type || data.message || "Unknown Violation",
+                  camera: `${data.camera || "Unknown Camera"} (${data.camera_location || "Unknown Location"})`,
+                  camera_name: data.camera || "Unknown Camera",
+                  type: "worker_violation",
+                  date: new Date(data.created_at).toLocaleDateString(),
+                  time: new Date(data.created_at).toLocaleTimeString(),
+                  isNew: true,
+                  status: data.status || "Pending",
+                  snapshot: data.snapshot || data.snapshot_b64 || null
+                };
+                return [newNotification, ...prev];
+              }
+            }
+            return prev;
+          });
+        } catch (err) {}
+      };
+      ws.onclose = () => {};
+      return () => {
+        try { ws.close(); } catch (e) {}
+      };
+    } catch (err) {}
   }, [notifications]);
 
   const toggleMenu = (id) => setOpenMenu(openMenu === id ? null : id);
@@ -186,14 +213,17 @@ export default function Notifications() {
   const markAsRead = async (id) => {
     try {
       await API.post(`/notifications/${id}/mark_read`);
-      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isNew: false } : n)));
+      setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, isNew: false } : n));
     } catch (err) {}
   };
 
   const normalizeViolationForModal = (n) => {
-    const snapshot = n.snapshot && typeof n.snapshot === "object"
-      ? (n.snapshot.base64 || n.snapshot.data || n.snapshot)
-      : n.snapshot;
+    const snapshotRaw = n.snapshot || n.snapshot_b64 || n.snapshot?.base64;
+    let snapshot = null;
+    if (snapshotRaw) {
+      // ensure data URI
+      snapshot = String(snapshotRaw).startsWith("data:") ? snapshotRaw : `data:image/jpeg;base64,${String(snapshotRaw)}`;
+    }
     const created_at = n.created_at || n.date || new Date().toISOString();
     const workerField = n.worker || n.worker_name || n.worker_code || "Unknown Worker";
     let workerStr = "Unknown Worker";
@@ -216,22 +246,26 @@ export default function Notifications() {
     };
   };
 
-  const handleChange = (filterName, value) => {
+  const handleChangeFilter = (filterName, value) => {
     setFilters((prev) => ({ ...prev, [filterName]: value }));
   };
 
   const filteredNotifications = notifications
     .filter((n) => {
       if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const matchesSearch =
-          (n.worker && n.worker.toLowerCase().includes(query)) ||
-          (n.violation && n.violation.toLowerCase().includes(query)) ||
-          (n.camera && n.camera.toLowerCase().includes(query));
+        const q = searchQuery.toLowerCase();
+        const workerText = (typeof n.worker === "string" ? n.worker : (n.worker || n.worker_name || "")).toString().toLowerCase();
+        const violationText = (n.violation || "").toString().toLowerCase();
+        const cameraText = (n.camera || n.camera_name || "").toString().toLowerCase();
+        const matchesSearch = workerText.includes(q) || violationText.includes(q) || cameraText.includes(q);
         if (!matchesSearch) return false;
       }
       if (filters.camera && n.camera_name !== filters.camera) return false;
-      if (filters.violation && n.violation !== filters.violation) return false;
+      if (filters.violation) {
+        // check comma-separated violation_types or violation string for inclusion
+        const vtext = (n.violation || "").toLowerCase();
+        if (!vtext.includes(filters.violation.toLowerCase())) return false;
+      }
       if (filter === "unread" && !n.isNew) return false;
       return true;
     })
@@ -277,7 +311,7 @@ export default function Notifications() {
               <label className="font-medium text-sm mb-1 text-gray-400">Camera</label>
               <select
                 value={filters.camera}
-                onChange={(e) => handleChange("camera", e.target.value)}
+                onChange={(e) => handleChangeFilter("camera", e.target.value)}
                 className="px-3 py-2 border border-gray-700 rounded-lg bg-[#2A2B30] text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
               >
                 <option value="">All Cameras</option>
@@ -291,7 +325,7 @@ export default function Notifications() {
               <label className="font-medium text-sm mb-1 text-gray-400">Violation Type</label>
               <select
                 value={filters.violation}
-                onChange={(e) => handleChange("violation", e.target.value)}
+                onChange={(e) => handleChangeFilter("violation", e.target.value)}
                 className="px-3 py-2 border border-gray-700 rounded-lg bg-[#2A2B30] text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
               >
                 <option value="">All Violations</option>
@@ -305,7 +339,7 @@ export default function Notifications() {
               <label className="font-medium text-sm mb-1 text-gray-400">Sort By</label>
               <select
                 value={filters.sortBy}
-                onChange={(e) => handleChange("sortBy", e.target.value)}
+                onChange={(e) => handleChangeFilter("sortBy", e.target.value)}
                 className="px-3 py-2 border border-gray-700 rounded-lg bg-[#2A2B30] text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#5388DF]"
               >
                 {sortOptions.map((sort) => (
@@ -348,7 +382,7 @@ export default function Notifications() {
                     <p className="text-white font-semibold text-lg">
                       {n.type === "worker_violation" ? `Worker ${n.worker_code} - ${n.worker}` : n.camera}
                     </p>
-                    {n.type === "worker_violation" && <p className="text-gray-400 text-sm mt-1">{n.camera}</p>}
+                    {n.type === "worker_violation" && <p className="text-gray-400 text-sm mt-1">{n.camera_name}</p>}
                     <div className="flex items-center gap-2 mt-1">
                       <p className="text-gray-300 text-sm">{n.violation}</p>
                       {n.status && (
@@ -387,17 +421,8 @@ export default function Notifications() {
           onClose={() => setShowModal(false)}
           onStatusChange={async (newStatus) => {
             try {
-              const token = localStorage.getItem("token");
-              const res = await fetch(`${API_BASE || ""}/violations/${selectedViolation.id}/status`, {
-                method: "PUT",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ status: newStatus }),
-              });
-              if (!res.ok) throw new Error("Failed to update status");
-              const data = await res.json();
+              const res = await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+              const data = res.data || {};
               setNotifications((prev) =>
                 prev.map((v) =>
                   v.violation_id === selectedViolation.id ? { ...v, status: data.status || newStatus, isNew: false } : v

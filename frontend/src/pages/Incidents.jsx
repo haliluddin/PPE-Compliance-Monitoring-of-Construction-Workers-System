@@ -8,6 +8,15 @@ import { format } from "date-fns";
 import API from "../api";
 import ViolationModal from "../components/ViolationModal";
 
+const VIOLATION_TYPES = [
+  "No Helmet",
+  "No Right Glove",
+  "No Left Glove",
+  "No Vest",
+  "No Right Shoe",
+  "No Left Shoe"
+];
+
 export default function Incident() {
   const [notifications, setNotifications] = useState([]);
   const [filters, setFilters] = useState({
@@ -32,15 +41,25 @@ export default function Incident() {
         const raw = res.data;
         const arr = Array.isArray(raw) ? raw : raw?.violations || [];
         setNotifications(
-          arr.map((r) => ({
-            id: r.id,
-            worker_code: r.worker_code,
-            worker: r.worker || r.worker_name,
-            camera: r.camera || r.camera_name || r.camera_id,
-            violation: r.violation_type || r.violation_types || r.violation,
-            created_at: r.created_at || r.createdAt,
-            status: r.status || "Pending",
-          }))
+          arr.map((r) => {
+            // normalize worker to string
+            let workerStr = "Unknown Worker";
+            if (r.worker_name) workerStr = r.worker_name;
+            else if (r.worker && typeof r.worker === "string") workerStr = r.worker;
+            else if (r.worker && typeof r.worker === "object") workerStr = r.worker.fullName || r.worker.name || JSON.stringify(r.worker);
+            else if (r.worker_code) workerStr = r.worker_code;
+            const cameraName = r.camera_name || r.camera || (r.camera_location ? r.camera_location : "");
+            return {
+              id: r.id,
+              worker_code: r.worker_code,
+              worker: workerStr,
+              camera: cameraName,
+              violation: r.violation_types || r.violation || "",
+              created_at: r.created_at || r.createdAt,
+              status: r.status || "Pending",
+              snapshot: r.snapshot || r.snapshot_b64 || null,
+            };
+          })
         );
       } catch (err) {}
     };
@@ -64,22 +83,23 @@ export default function Incident() {
     fetchCameras();
   }, []);
 
-  const violationOptions = ["No Helmet", "No Vest", "No Gloves", "No Boots"];
   const filteredNotifications = notifications
     .filter((n) => {
-      if (
-        searchQuery &&
-        !(
-          (n.worker && n.worker.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (n.violation && n.violation.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (n.camera && n.camera.toLowerCase().includes(searchQuery.toLowerCase()))
-        )
-      ) {
-        return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const workerText = (typeof n.worker === "string" ? n.worker : (n.worker || "")).toString().toLowerCase();
+        const violationText = (n.violation || "").toString().toLowerCase();
+        const cameraText = (n.camera || "").toString().toLowerCase();
+        if (!(workerText.includes(q) || violationText.includes(q) || cameraText.includes(q))) {
+          return false;
+        }
       }
       if (filters.camera && n.camera !== filters.camera) return false;
-      if (filters.violation && n.violation !== filters.violation) return false;
-      if (filters.status && n.status?.toLowerCase() !== filters.status.toLowerCase()) return false;
+      if (filters.violation) {
+        const v = (n.violation || "").toLowerCase();
+        if (!v.includes(filters.violation.toLowerCase())) return false;
+      }
+      if (filters.status && (n.status || "Pending").toLowerCase() !== filters.status.toLowerCase()) return false;
       if (filters.date) {
         const notificationDate = new Date(n.created_at);
         const filterDate = new Date(filters.date);
@@ -109,9 +129,11 @@ export default function Incident() {
   };
 
   const normalizeViolationForModal = (n) => {
-    const snapshot = n.snapshot && typeof n.snapshot === "object"
-      ? (n.snapshot.base64 || n.snapshot.data || n.snapshot)
-      : n.snapshot;
+    const snapshotRaw = n.snapshot || n.snapshot_b64 || (n.snapshot && n.snapshot.base64) || null;
+    let snapshot = null;
+    if (snapshotRaw) {
+      snapshot = String(snapshotRaw).startsWith("data:") ? snapshotRaw : `data:image/jpeg;base64,${String(snapshotRaw)}`;
+    }
     const created_at = n.created_at || n.date || new Date().toISOString();
     const workerField = n.worker || n.worker_name || n.worker_code || "Unknown Worker";
     let workerStr = "Unknown Worker";
@@ -191,7 +213,7 @@ export default function Incident() {
             <label className="font-medium text-sm mb-1 text-gray-400">Violation Type</label>
             <select value={filters.violation} onChange={(e) => handleChange("violation", e.target.value)} className="px-3 py-3 border border-gray-700 rounded-lg bg-[#2A2B30] shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#5388DF] text-gray-200">
               <option value="">All Violations</option>
-              {violationOptions.map((vio) => <option key={vio} value={vio}>{vio}</option>)}
+              {VIOLATION_TYPES.map((vio) => <option key={vio} value={vio}>{vio}</option>)}
             </select>
           </div>
 
@@ -235,7 +257,7 @@ export default function Incident() {
               <div className="text-gray-300">{n.camera || "Unknown Camera"}</div>
               <div className="text-gray-300">{n.violation}</div>
               <div>
-                <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(n.status)}`}>
+                <span className={`px-3 py-1 text-xs font-semibold rounded-full border ${getStatusColor(n.status)}`}>
                   {n.status ? n.status.toUpperCase() : "No Status"}
                 </span>
               </div>

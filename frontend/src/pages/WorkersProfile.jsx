@@ -1,6 +1,6 @@
 // frontend/src/pages/WorkersProfile.jsx
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ShieldCheck, Calendar, Search, Filter, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Calendar } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { FaEye } from "react-icons/fa";
 import { useParams, useNavigate } from 'react-router-dom';
@@ -9,23 +9,20 @@ import ViolationModal from "../components/ViolationModal";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-
 export default function WorkersProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [selectedViolation, setSelectedViolation] = useState(null);
-const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
+  const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
 
   const [workerData, setWorkerData] = useState(null);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [selectedType, setSelectedType] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-const [sortBy, setSortBy] = useState('Newest'); 
-const [statusFilter, setStatusFilter] = useState('All'); 
+  const [sortBy, setSortBy] = useState('Newest'); 
+  const [statusFilter, setStatusFilter] = useState('All'); 
 
-
-  // Fetch worker profile
   useEffect(() => {
     const fetchWorker = async () => {
       try {
@@ -33,17 +30,31 @@ const [statusFilter, setStatusFilter] = useState('All');
         const data = res.data;
 
         const total = data.violationHistory?.length || 0;
-        const compliant = data.violationHistory?.filter(v => v.type === 'No Violation').length || 0;
         data.resolutionRate = total > 0
         ? Math.round(
-            (data.violationHistory.filter(v => v.status === 'resolved').length / total) * 100
+            (data.violationHistory.filter(v => (v.status || '').toLowerCase() === 'resolved').length / total) * 100
           )
         : 0;
 
-        const sortedViolations = data.violationHistory?.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const sortedViolations = (data.violationHistory || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
         data.lastViolationDate = sortedViolations?.[0]?.date || null;
         data.totalViolations = total;
-        data.resolvedViolations = data.violationHistory?.filter(v => v.status === 'resolved').length || 0;
+        data.resolvedViolations = (data.violationHistory || []).filter(v => (v.status || '').toLowerCase() === 'resolved').length || 0;
+
+        // normalize violation entries
+        data.violationHistory = (data.violationHistory || []).map(v => {
+          let workerName = "Unknown";
+          if (v.worker_name) workerName = v.worker_name;
+          else if (v.worker && typeof v.worker === 'string') workerName = v.worker;
+          else if (v.worker && typeof v.worker === 'object') workerName = v.worker.fullName || v.worker.name || JSON.stringify(v.worker);
+          else if (data.fullName) workerName = data.fullName;
+          return {
+            ...v,
+            worker: workerName,
+            snapshot: v.snapshot || v.snapshot_b64 || v.snapshot?.base64 || null,
+            violation: v.violation_types || v.violation || ""
+          };
+        });
 
         setWorkerData(data);
       } catch (error) {
@@ -55,32 +66,29 @@ const [statusFilter, setStatusFilter] = useState('All');
     fetchWorker();
   }, [id]);
 
-  // Filter violations
   const filterViolations = () => {
-  if (!workerData?.violationHistory) return [];
+    if (!workerData?.violationHistory) return [];
 
-  let filtered = workerData.violationHistory.filter(violation => {
-    const matchesType = selectedType === 'All' || violation.type === selectedType;
-    const matchesStatus = statusFilter === 'All' || violation.status === statusFilter.toLowerCase();
-    const matchesSearch = !searchQuery ||
-      Object.values(violation).some(
-        val => String(val).toLowerCase().includes(searchQuery.toLowerCase())
-      );
+    let filtered = workerData.violationHistory.filter(violation => {
+      const matchesType = selectedType === 'All' || (violation.violation || "").toLowerCase().includes(selectedType.toLowerCase());
+      const matchesStatus = statusFilter === 'All' || (violation.status || '').toLowerCase() === statusFilter.toLowerCase();
+      const matchesSearch = !searchQuery ||
+        Object.values(violation).some(
+          val => String(val).toLowerCase().includes(searchQuery.toLowerCase())
+        );
 
-    return matchesType && matchesStatus && matchesSearch;
-  });
+      return matchesType && matchesStatus && matchesSearch;
+    });
 
-  // Sort
-  filtered.sort((a, b) => {
-    if (sortBy === 'Newest') return new Date(b.date) - new Date(a.date);
-    if (sortBy === 'Oldest') return new Date(a.date) - new Date(b.date);
-    return 0;
-  });
+    filtered.sort((a, b) => {
+      if (sortBy === 'Newest') return new Date(b.date) - new Date(a.date);
+      if (sortBy === 'Oldest') return new Date(a.date) - new Date(b.date);
+      return 0;
+    });
 
-  return filtered;
-};
+    return filtered;
+  };
 
-  // Close filter dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       const filterButton = event.target.closest('.filter-button');
@@ -99,122 +107,115 @@ const [statusFilter, setStatusFilter] = useState('All');
     );
   }
 
- const openViolationModal = (violation) => {
-  setSelectedViolation(violation);
-  setIsViolationModalOpen(true);
-};
+  const openViolationModal = (violation) => {
+    const snapshotRaw = violation.snapshot || violation.snapshot_b64 || violation.snapshot?.base64;
+    const snapshot = snapshotRaw ? (String(snapshotRaw).startsWith("data:") ? snapshotRaw : `data:image/jpeg;base64,${String(snapshotRaw)}`) : null;
+    setSelectedViolation({ ...violation, snapshot });
+    setIsViolationModalOpen(true);
+  };
 
-const closeViolationModal = () => {
-  setSelectedViolation(null);
-  setIsViolationModalOpen(false);
-};
+  const closeViolationModal = () => {
+    setSelectedViolation(null);
+    setIsViolationModalOpen(false);
+  };
 
-const handleStatusChange = async (newStatus) => {
-  if (!selectedViolation) return;
+  const handleStatusChange = async (newStatus) => {
+    if (!selectedViolation) return;
 
-  try {
-    await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
-    setWorkerData((prev) => ({
-      ...prev,
-      violationHistory: prev.violationHistory.map((v) =>
-        v.id === selectedViolation.id ? { ...v, status: newStatus } : v
-      ),
-    }));
-    setSelectedViolation((prev) => ({ ...prev, status: newStatus }));
-  } catch (error) {
-    console.error("Failed to update status:", error);
-  }
-};
+    try {
+      const res = await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+      setWorkerData((prev) => ({
+        ...prev,
+        violationHistory: prev.violationHistory.map((v) =>
+          v.id === selectedViolation.id ? { ...v, status: newStatus } : v
+        ),
+      }));
+      setSelectedViolation((prev) => ({ ...prev, status: newStatus }));
+    } catch (error) {
+      console.error("Failed to update status:", error);
+    }
+  };
 
-const exportToPDF = () => {
-  if (!workerData) return;
+  const exportToPDF = () => {
+    if (!workerData) return;
 
-  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-  const margin = 40;
-  let yPos = 40;
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const margin = 40;
+    let yPos = 40;
 
-  // Title
-  doc.setFontSize(18);
-  doc.setTextColor(33, 33, 33);
-  doc.text(`Worker Report`, margin, yPos);
-  yPos += 25;
+    doc.setFontSize(18);
+    doc.setTextColor(33, 33, 33);
+    doc.text(`Worker Report`, margin, yPos);
+    yPos += 25;
 
-  doc.setFontSize(14);
-  doc.setTextColor(55, 55, 55);
-  doc.text(`Name: ${workerData.fullName}`, margin, yPos);
-  yPos += 20;
-  doc.text(`Worker Code: ${workerData.worker_code}`, margin, yPos);
-  yPos += 20;
-  doc.text(`Status: ${workerData.status}`, margin, yPos);
-  yPos += 20;
-  doc.text(
-    `Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`,
-    margin,
-    yPos
-  );
-  yPos += 20;
-  doc.text(`Total Violations: ${workerData.totalViolations}`, margin, yPos);
-  yPos += 20;
-  doc.text(
-  `Violation Resolution Rate: ${workerData.resolutionRate}% (${workerData.resolvedViolations} resolved out of ${workerData.totalViolations})`,
-  margin,
-  yPos
-);
+    doc.setFontSize(14);
+    doc.setTextColor(55, 55, 55);
+    doc.text(`Name: ${workerData.fullName}`, margin, yPos);
+    yPos += 20;
+    doc.text(`Worker Code: ${workerData.worker_code}`, margin, yPos);
+    yPos += 20;
+    doc.text(`Status: ${workerData.status}`, margin, yPos);
+    yPos += 20;
+    doc.text(
+      `Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`,
+      margin,
+      yPos
+    );
+    yPos += 20;
+    doc.text(`Total Violations: ${workerData.totalViolations}`, margin, yPos);
+    yPos += 20;
+    doc.text(
+      `Violation Resolution Rate: ${workerData.resolutionRate}% (${workerData.resolvedViolations} resolved out of ${workerData.totalViolations})`,
+      margin,
+      yPos
+    );
+    yPos += 30;
 
-  yPos += 30;
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(margin, yPos, 555, yPos);
+    yPos += 15;
 
-  // Section Separator
-  doc.setDrawColor(200, 200, 200);
-  doc.setLineWidth(0.5);
-  doc.line(margin, yPos, 555, yPos);
-  yPos += 15;
+    const tableColumn = ["Date & Time", "Violation Type", "Camera Location", "Status"];
+    const tableRows = (workerData.violationHistory || []).map(v => [
+      new Date(v.date).toLocaleString(),
+      v.violation,
+      v.cameraLocation || v.camera || "",
+      (v.status || "").charAt(0).toUpperCase() + (v.status || "").slice(1)
+    ]);
 
-  // Violation Table
-  const tableColumn = ["Date & Time", "Violation Type", "Camera Location", "Status"];
-  const tableRows = workerData.violationHistory.map(v => [
-    new Date(v.date).toLocaleString(),
-    v.type,
-    v.cameraLocation,
-    v.status.charAt(0).toUpperCase() + v.status.slice(1)
-  ]);
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: yPos,
+      theme: 'grid',
+      headStyles: { fillColor: [25, 50, 92], textColor: [255, 255, 255], fontSize: 11 },
+      styles: { fontSize: 10, cellPadding: 5 },
+      columnStyles: {
+        0: { cellWidth: 110 },
+        1: { cellWidth: 110 },
+        2: { cellWidth: 150 },
+        3: { cellWidth: 80 },
+      },
+      margin: { left: margin, right: margin },
+      didDrawPage: (data) => {
+        const pageCount = doc.getNumberOfPages();
+        doc.setFontSize(10);
+        doc.setTextColor(120);
+        doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`, 555, 820, { align: "right" });
+      },
+    });
 
-  autoTable(doc, {
-    head: [tableColumn],
-    body: tableRows,
-    startY: yPos,
-    theme: 'grid',
-    headStyles: { fillColor: [25, 50, 92], textColor: [255, 255, 255], fontSize: 11 },
-    styles: { fontSize: 10, cellPadding: 5 },
-    columnStyles: {
-      0: { cellWidth: 110 },
-      1: { cellWidth: 110 },
-      2: { cellWidth: 150 },
-      3: { cellWidth: 80 },
-    },
-    margin: { left: margin, right: margin },
-    didDrawPage: (data) => {
-      const pageCount = doc.getNumberOfPages();
-      doc.setFontSize(10);
-      doc.setTextColor(120);
-      doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`, 555, 820, { align: "right" });
-    },
-  });
+    const safeName = (workerData.fullName || "worker").replace(/[^a-z0-9]/gi, '_');
+    const today = new Date();
+    const dateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const fileName = `${safeName}_${dateString}_Report.pdf`;
 
-  // Generate filename using worker's name and current date
-  const safeName = workerData.fullName.replace(/[^a-z0-9]/gi, '_'); // replace spaces/special chars
-  const today = new Date();
-  const dateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const fileName = `${safeName}_${dateString}_Report.pdf`;
-
-  doc.save(fileName);
-};
-
-
-
+    doc.save(fileName);
+  };
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
-      {/* Back Button */}
       <button
         onClick={() => navigate('/workers')}
         className="mb-6 flex items-center text-[#5388DF] hover:text-[#19325C] transition-colors"
@@ -227,24 +228,13 @@ const exportToPDF = () => {
         <div className="flex flex-col">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              {/* Profile Picture */}
               <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-gray-700/50 border-2 border-gray-600 flex items-center justify-center flex-shrink-0">
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  className="h-8 w-8 md:h-10 md:w-10 text-gray-400" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="1.5" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round"
-                >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 md:h-10 md:w-10 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                   <circle cx="12" cy="7" r="4"></circle>
                 </svg>
               </div>
 
-              {/* Name and Basic Info */}
               <div>
                 <div className="flex items-center space-x-3">
                   <h1 className="text-xl md:text-2xl font-bold text-white">{workerData.fullName || workerData.name}</h1>
@@ -263,36 +253,20 @@ const exportToPDF = () => {
               </div>
             </div>
 
-            {/* Toggle Button */}
             <button 
               onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
               className="text-gray-400 hover:text-white transition-colors p-2 -mr-2"
               aria-label={isDetailsExpanded ? 'Hide details' : 'Show details'}
             >
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                className={`h-5 w-5 transform transition-transform duration-200 ${isDetailsExpanded ? 'rotate-180' : ''}`} 
-                fill="none" 
-                viewBox="0 0 24 24" 
-                stroke="currentColor"
-              >
+              <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 transform transition-transform duration-200 ${isDetailsExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </button>
           </div>
 
-          {/* Collapsible Details */}
           {isDetailsExpanded && (
             <div className="mt-6 pt-6 border-t border-gray-700">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* <div className="space-y-1">
-                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Worker Role</p>
-                  <p className="text-white font-medium">{workerData.role || 'Not specified'}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Assigned Location</p>
-                  <p className="text-white font-medium">{workerData.assignedLocation || 'Not assigned'}</p>
-                </div> */}
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Date Added</p>
                   <p className="text-white font-medium">
@@ -315,9 +289,7 @@ const exportToPDF = () => {
         </div>
       </div>
 
-      {/* Violation Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-        {/* Total Violations Card */}
         <div className="bg-[#2A2B30] p-4 rounded-xl shadow-lg">
           <div className="flex items-start justify-between">
             <div className="flex-1">
@@ -332,29 +304,17 @@ const exportToPDF = () => {
               </div>
             </div>
             <div className="p-4 bg-red-500/10 rounded-lg flex items-center justify-center ml-6">
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                className="h-8 w-8 text-red-400"
-                fill="none" 
-                viewBox="0 0 24 24" 
-                stroke="currentColor"
-              >
-                <path 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  strokeWidth={2} 
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" 
-                />
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             </div>
           </div>
         </div>
 
-        {/* Compliance Rate Card */}
         <div className="bg-[#2A2B30] p-4 rounded-xl shadow-lg">
           <div className="flex items-start justify-between">
             <div>
-             <p className="text-sm text-gray-400">Violation Resolution Rate</p>
+              <p className="text-sm text-gray-400">Violation Resolution Rate</p>
               <p className="text-2xl font-bold text-white mt-1">
                 {workerData.resolutionRate || 0}%
               </p>
@@ -375,15 +335,12 @@ const exportToPDF = () => {
           </div>
         </div>
 
-        {/* Last Violation Card */}
         <div className="bg-[#2A2B30] p-4 rounded-xl shadow-lg">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-sm text-gray-400">Last Violation</p>
               <p className="text-2xl font-bold text-white mt-1">
-                {workerData.lastViolationDate 
-                  ? format(parseISO(workerData.lastViolationDate), 'MMM d, yyyy') 
-                  : 'None'}
+                {workerData.lastViolationDate ? format(parseISO(workerData.lastViolationDate), 'MMM d, yyyy') : 'None'}
               </p>
               <div className="mt-2">
                 <span className="text-xs text-gray-400 font-medium">
@@ -398,17 +355,12 @@ const exportToPDF = () => {
         </div>
       </div>
 
-      {/* Violation History Section */}
       <div className="bg-[#2A2B30] p-6 shadow-lg rounded-xl mb-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
           <h2 className="text-xl font-semibold text-gray-200">Violation History</h2>
 
           <div className="flex flex-col md:flex-row md:items-center space-y-2 md:space-y-0 md:space-x-4">
-           
-           
-            {/* Search Bar */}
             <div className="relative w-full md:w-64">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search violations..."
@@ -418,26 +370,21 @@ const exportToPDF = () => {
               />
             </div>
 
-            {/* Filter Button */}
             <div className="relative">
               <button 
                 className="filter-button flex items-center space-x-2 px-4 py-2 bg-[#1E1F23] rounded-md text-gray-300 hover:bg-[#2A2B30]"
                 onClick={() => setShowFilter(!showFilter)}
               >
-                <Filter size={16} />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 4h18M6 12h12M10 20h4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 <span>Filter</span>
-                <ChevronDown size={16} />
               </button>
 
-              {/* Filter Dropdown */}
               {showFilter && (
                 <div 
                   className="filter-dropdown absolute right-0 mt-2 w-80 bg-[#2A2B30] rounded-md shadow-lg p-4 z-10 border border-gray-700"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="space-y-4">
-
-                    {/* Sort By */}
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-1">Sort By</label>
                       <select
@@ -450,7 +397,6 @@ const exportToPDF = () => {
                       </select>
                     </div>
 
-                    {/* Status Filter */}
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
                       <select
@@ -465,7 +411,6 @@ const exportToPDF = () => {
                       </select>
                     </div>
 
-                    {/* Violation Type */}
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-1">Violation Type</label>
                       <select
@@ -476,12 +421,13 @@ const exportToPDF = () => {
                         <option value="All">All Types</option>
                         <option value="No Helmet">No Helmet</option>
                         <option value="No Vest">No Vest</option>
-                        <option value="No Gloves">No Gloves</option>
-                        <option value="No Boots">No Boots</option>
+                        <option value="No Right Glove">No Right Glove</option>
+                        <option value="No Left Glove">No Left Glove</option>
+                        <option value="No Right Shoe">No Right Shoe</option>
+                        <option value="No Left Shoe">No Left Shoe</option>
                       </select>
                     </div>
 
-                    {/* Clear Filters */}
                     <button
                       onClick={() => {
                         setSortBy('Newest');
@@ -501,7 +447,7 @@ const exportToPDF = () => {
             <div className="flex space-x-2">
               <button 
                 className="px-3 py-3 text-xs font-medium text-white bg-blue rounded-md hover:bg-[#5388DF] transition-colors"
-                onClick={exportToPDF}  // <- call the function here
+                onClick={exportToPDF}
               >
                 Export to PDF
               </button>
@@ -509,7 +455,6 @@ const exportToPDF = () => {
           </div>
         </div>
 
-        {/* Table */}
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead>
@@ -529,39 +474,38 @@ const exportToPDF = () => {
                     key={index} 
                     className="grid grid-cols-5 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
                   >
-                    <td className="text-gray-300">{format(parseISO(violation.date), 'MMM d, yyyy hh:mm a')}</td>
-                    <td className="text-gray-300">{violation.type}</td>
-                   <td className="text-gray-300">{violation.cameraLocation}</td>
-                   <td>
-                    <span
-                      className={`px-3 py-1 text-xs font-medium rounded-full border ${
-                        violation.status === "resolved"
-                          ? "bg-green-500/20 text-green-400 border-green-600/50"
-                          : violation.status === "pending"
-                          ? "bg-red-500/20 text-red-400 border-red-600/50"
-                          : violation.status === "false positive"
-                          ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50"
-                          : "bg-blue-900/30 text-blue-300 border-gray-700"
-                      }`}
-                    >
-                      {violation.status || "Pending"}
-                    </span>
-                  </td>
+                    <td className="text-gray-300">{violation.date ? new Date(violation.date).toLocaleString() : '-'}</td>
+                    <td className="text-gray-300">{violation.violation}</td>
+                    <td className="text-gray-300">{violation.cameraLocation || violation.camera || 'Unknown'}</td>
+                    <td>
+                      <span
+                        className={`px-3 py-1 text-xs font-medium rounded-full border ${
+                          (violation.status || "pending").toLowerCase() === "resolved"
+                            ? "bg-green-500/20 text-green-400 border-green-600/50"
+                            : (violation.status || "pending").toLowerCase() === "pending"
+                            ? "bg-red-500/20 text-red-400 border-red-600/50"
+                            : (violation.status || "pending").toLowerCase() === "false positive"
+                            ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50"
+                            : "bg-blue-900/30 text-blue-300 border-gray-700"
+                        }`}
+                      >
+                        {violation.status || "Pending"}
+                      </span>
+                    </td>
                     <td className="text-gray-300">
-                    <button
-                      onClick={() => openViolationModal(violation)}
-                      className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors"
-                    >
-                      <FaEye className="mr-2" />
-                      View
-                    </button>
-
+                      <button
+                        onClick={() => openViolationModal(violation)}
+                        className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors"
+                      >
+                        <FaEye className="mr-2" />
+                        View
+                      </button>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-400">
+                  <td colSpan="5" className="px-6 py-4 text-center text-sm text-gray-400">
                     No violation records found
                   </td>
                 </tr>
@@ -571,27 +515,26 @@ const exportToPDF = () => {
         </div>
       </div>
       {isViolationModalOpen && selectedViolation && (
-  <ViolationModal
-    violation={selectedViolation}
-    onClose={closeViolationModal}
-    onStatusChange={async (newStatus) => {
-      try {
-        await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
-        setWorkerData(prev => {
-          const updatedHistory = prev.violationHistory.map(v =>
-            v.id === selectedViolation.id ? { ...v, status: newStatus } : v
-          );
-          return { ...prev, violationHistory: updatedHistory };
-        });
-        setSelectedViolation(prev => ({ ...prev, status: newStatus }));
-      } catch (error) {
-        console.error("Failed to update status:", error);
-      }
-    }}
-  />
-)}
-
-
+        <ViolationModal
+          violation={selectedViolation}
+          onClose={closeViolationModal}
+          onStatusChange={async (newStatus) => {
+            try {
+              const res = await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+              const data = res.data;
+              setWorkerData(prev => {
+                const updatedHistory = prev.violationHistory.map(v =>
+                  v.id === selectedViolation.id ? { ...v, status: newStatus } : v
+                );
+                return { ...prev, violationHistory: updatedHistory };
+              });
+              setSelectedViolation(prev => ({ ...prev, status: newStatus }));
+            } catch (error) {
+              console.error("Failed to update status:", error);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

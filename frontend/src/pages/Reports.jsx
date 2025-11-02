@@ -33,7 +33,7 @@ export default function Reports() {
             : "today";
 
         const response = await API.get(`/reports?period=${periodParam}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: token ? `Bearer ${token}` : undefined },
         });
 
         setCameraData(response.data.camera_data || []);
@@ -74,7 +74,7 @@ export default function Reports() {
             : "today";
 
         const res = await API.get(`/reports/performance?period=${periodParam}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: token ? `Bearer ${token}` : undefined },
         });
 
         setPerformanceData(res.data.performance_over_time || []);
@@ -98,7 +98,7 @@ export default function Reports() {
           : "today";
 
       const res = await API.get(`/reports/export?period=${periodParam}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: token ? `Bearer ${token}` : undefined },
         responseType: "blob"
       });
 
@@ -407,7 +407,7 @@ export default function Reports() {
                 <BarChart data={offendersData} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }} barSize={40}>
                   <CartesianGrid horizontal={false} stroke="#374151" strokeDasharray="3 3" />
                   <XAxis type="number" tick={{ fill: '#9CA3AF', fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fill: '#E5E7EB', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} width={100} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: '#E5E7EB', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} width={150} />
                   <Tooltip contentStyle={{ backgroundColor: '#2A2B30', border: '1px solid #4B5563', borderRadius: '0.5rem', color: '#E5E7EB', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2)' }} cursor={false} />
                   <Bar dataKey="value" radius={[0,4,4,0]} isAnimationActive={false}>
                     {offendersData.map((entry, index) => (
