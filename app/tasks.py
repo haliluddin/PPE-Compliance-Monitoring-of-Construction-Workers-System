@@ -1,3 +1,4 @@
+# app/tasks.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -191,7 +192,7 @@ def _init_local_yolo():
                     if self.ppe_model is None:
                         return {}
                     try:
-                        results = self.ppe_model.predict(source=frame, conf=self.conf, iou=self.iou, classes=[0,1,3,4], verbose=False)
+                        results = self.ppe_model.predict(source=frame, conf=self.conf, iou=self.iou, classes=[0,1,2,3], verbose=False)
                         if not results:
                             return {}
                         r = results[0]

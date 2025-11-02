@@ -1,3 +1,4 @@
+// frontend/src/pages/Workers.jsx
 import { FaUserAlt, FaEye, FaPlus, FaSearch, FaTimes } from "react-icons/fa";
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";

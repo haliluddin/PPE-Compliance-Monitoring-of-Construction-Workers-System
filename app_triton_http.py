@@ -12,13 +12,15 @@ import asyncio
 import json
 import threading
 from urllib.parse import urlparse
-from datetime import datetime
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
-from fastapi.responses import Response
+from datetime import datetime, timedelta
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body
+from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
 import cv2
+import io
+import csv
 try:
     import redis
 except Exception:
@@ -602,5 +604,137 @@ def list_cameras():
         for c in cams:
             out.append({"id": c.id, "name": getattr(c, "name", f"Camera {c.id}"), "location": getattr(c, "location", "")})
         return out
+    finally:
+        sess.close()
+@app.post("/cameras")
+def create_camera(payload: dict = Body(...)):
+    sess = SessionLocal()
+    try:
+        name = payload.get("name") or ""
+        location = payload.get("location") or ""
+        stream_url = payload.get("stream_url") or ""
+        cam = Camera()
+        try:
+            setattr(cam, "name", name)
+        except Exception:
+            pass
+        try:
+            setattr(cam, "location", location)
+        except Exception:
+            pass
+        try:
+            setattr(cam, "stream_url", stream_url)
+        except Exception:
+            pass
+        sess.add(cam)
+        sess.commit()
+        sess.refresh(cam)
+        return {"camera_id": getattr(cam, "id", None), "id": getattr(cam, "id", None), "name": getattr(cam, "name", None), "location": getattr(cam, "location", None)}
+    finally:
+        sess.close()
+@app.get("/reports")
+def quick_reports(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        if period == "last_week":
+            start = now - timedelta(days=7)
+        elif period == "last_month":
+            start = now - timedelta(days=30)
+        else:
+            start = datetime(now.year, now.month, now.day)
+        rows = sess.query(Violation).filter(Violation.created_at >= start).all()
+        total_incidents = len(rows)
+        counts = {}
+        camera_counts = {}
+        resolved = 0
+        for v in rows:
+            code = getattr(v, "worker_code", "UNKNOWN")
+            counts[code] = counts.get(code, 0) + 1
+            cam = getattr(v, "camera_name", None) or getattr(v, "camera_id", None) or "Unknown"
+            camera_counts[cam] = camera_counts.get(cam, 0) + 1
+            if getattr(v, "status", "").lower() == "resolved":
+                resolved += 1
+        top_offenders = [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
+        camera_data = [{"location": k, "violations": v, "risk": "High" if v > 5 else "Medium" if v > 2 else "Low"} for k, v in camera_counts.items()]
+        most_violations = [{"name": k, "violations": v} for k, v in sorted(camera_counts.items(), key=lambda x: x[1], reverse=True)]
+        worker_data = [{"rank": i+1, "name": k, "violations": v, "resolved": 0, "resolution_rate": 0} for i, (k, v) in enumerate(sorted(counts.items(), key=lambda x: x[1], reverse=True))]
+        violation_resolution_rate = round((resolved / total_incidents * 100) if total_incidents > 0 else 0, 2)
+        return {
+            "total_incidents": total_incidents,
+            "total_workers_involved": len(counts),
+            "violation_resolution_rate": violation_resolution_rate,
+            "high_risk_locations": sum(1 for d in camera_data if d["risk"] == "High"),
+            "most_violations": most_violations,
+            "top_offenders": top_offenders,
+            "camera_data": camera_data,
+            "worker_data": worker_data
+        }
+    finally:
+        sess.close()
+@app.get("/reports/performance")
+def reports_performance(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        if period == "last_week":
+            start = now - timedelta(days=7)
+            days = 7
+        elif period == "last_month":
+            start = now - timedelta(days=30)
+            days = 30
+        else:
+            start = datetime(now.year, now.month, now.day)
+            days = 1
+        rows = sess.query(Violation).filter(Violation.created_at >= start).all()
+        date_buckets = {}
+        response_times = []
+        for v in rows:
+            dt = getattr(v, "created_at", None)
+            if not dt:
+                continue
+            date_key = dt.strftime("%Y-%m-%d")
+            date_buckets.setdefault(date_key, {"violations": 0, "compliance": 0})
+            date_buckets[date_key]["violations"] += 1
+            if getattr(v, "status", "").lower() == "resolved":
+                date_buckets[date_key]["compliance"] += 1
+            rt = getattr(v, "response_time", None)
+            if isinstance(rt, (int, float)):
+                response_times.append(float(rt))
+        performance_over_time = [{"date": k, "violations": v["violations"], "compliance": v["compliance"]} for k, v in sorted(date_buckets.items())]
+        average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0
+        return {"performance_over_time": performance_over_time, "average_response_time": average_response_time}
+    finally:
+        sess.close()
+@app.get("/reports/export")
+def reports_export(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        if period == "last_week":
+            start = now - timedelta(days=7)
+        elif period == "last_month":
+            start = now - timedelta(days=30)
+        else:
+            start = datetime(now.year, now.month, now.day)
+        rows = sess.query(Violation).filter(Violation.created_at >= start).all()
+        si = io.StringIO()
+        cw = csv.writer(si)
+        cw.writerow(["id", "worker_code", "worker_name", "violation_types", "camera", "camera_location", "created_at", "status"])
+        for v in rows:
+            cw.writerow([
+                getattr(v, "id", ""),
+                getattr(v, "worker_code", ""),
+                getattr(v, "worker", "") or getattr(v, "worker_name", ""),
+                getattr(v, "violation_types", "") or getattr(v, "violation_type", ""),
+                getattr(v, "camera_name", "") or getattr(v, "camera_id", ""),
+                getattr(v, "camera_location", "") or "",
+                getattr(v, "created_at", ""),
+                getattr(v, "status", "Pending")
+            ])
+        output = si.getvalue()
+        nowstr = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        headers = {"Content-Disposition": f'attachment; filename="report_{period}_{nowstr}.csv"'}
+        return Response(content=output, media_type="text/csv", headers=headers)
     finally:
         sess.close()
