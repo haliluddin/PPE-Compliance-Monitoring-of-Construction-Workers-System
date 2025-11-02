@@ -287,6 +287,58 @@ def _parse_person_boxes_from_triton_outputs(outputs, H, W):
                     boxes.append((x1c, y1c, x2c, y2c, final_conf))
     return boxes
 
+def _prettify_violation_label(label: str) -> str:
+    if not label:
+        return ""
+    s = str(label).strip().lower()
+    if "helmet" in s:
+        return "No Helmet"
+    if "vest" in s:
+        return "No Vest"
+    if "glove" in s and "right" in s:
+        return "No Right Glove"
+    if "glove" in s and "left" in s:
+        return "No Left Glove"
+    if "glove" in s and "right" not in s and "left" not in s:
+        return "No Glove"
+    if "shoe" in s and "right" in s:
+        return "No Right Shoe"
+    if "shoe" in s and "left" in s:
+        return "No Left Shoe"
+    if "shoe" in s and "right" not in s and "left" not in s:
+        return "No Shoe"
+    # fallback: title-case words and ensure "No " prefix if indication present
+    if "no " in s or s.startswith("no"):
+        return s.replace("_", " ").title()
+    return s.title()
+
+def _format_violation_types(raw_list):
+    if not raw_list:
+        return ""
+    try:
+        # raw_list may be list of strings or semicolon/pipe separated
+        if isinstance(raw_list, str):
+            # split common delimiters
+            parts = [p for delim in [";", "|", ","] for p in raw_list.split(delim)]
+            parts = [p.strip() for p in parts if p and p.strip()]
+        elif isinstance(raw_list, (list, tuple)):
+            parts = []
+            for p in raw_list:
+                if isinstance(p, str):
+                    parts.extend([x.strip() for x in p.replace("|", ";").split(";") if x.strip()])
+                else:
+                    parts.append(str(p))
+        else:
+            parts = [str(raw_list)]
+        pretty = []
+        for p in parts:
+            pl = _prettify_violation_label(p)
+            if pl and pl not in pretty:
+                pretty.append(pl)
+        return ", ".join(pretty)
+    except Exception:
+        return str(raw_list)
+
 def _process_image(image_bytes, meta=None):
     sess = None
     try:
@@ -386,12 +438,21 @@ def _process_image(image_bytes, meta=None):
             worker_id = None
             worker_obj = None
             if id_label is not None and id_label != "UNID":
-                if str(id_label).startswith("UNREG:"):
-                    worker_code = str(id_label).split(":", 1)[1]
-                else:
+                try:
+                    if isinstance(id_label, dict):
+                        worker_code = id_label.get("worker_code") or id_label.get("code") or id_label.get("id") or str(id_label)
+                    else:
+                        worker_code = str(id_label)
+                except Exception:
                     worker_code = str(id_label)
+                worker_code = worker_code.strip()
                 try:
                     worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
+                    if worker_obj is None:
+                        try:
+                            worker_obj = sess.query(Worker).filter(Worker.worker_code.ilike(worker_code)).first()
+                        except Exception:
+                            worker_obj = None
                 except Exception:
                     worker_obj = None
                 if worker_obj is not None:
@@ -424,7 +485,8 @@ def _process_image(image_bytes, meta=None):
                 should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
                 if should_save_violation:
                     try:
-                        v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=";".join(violations), frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
+                        pretty_violation_types = _format_violation_types(violations)
+                        v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=pretty_violation_types, frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
                         sess.add(v)
                         sess.commit()
                         sess.refresh(v)
