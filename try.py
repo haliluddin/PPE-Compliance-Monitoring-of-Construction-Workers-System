@@ -13,7 +13,6 @@ import time
 import cv2
 import numpy as np
 import logging
-from sqlalchemy import or_
 from datetime import datetime
 from threading import Lock
 
@@ -384,17 +383,35 @@ def _process_image(image_bytes, meta=None):
             worker_code = None
             worker_id = None
             worker_obj = None
-            if id_label is not None and id_label != "UNID":
-                if str(id_label).startswith("UNREG:"):
-                    worker_code = str(id_label).split(":", 1)[1]
-                else:
-                    worker_code = str(id_label)
-                try:
-                    worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
-                except Exception:
-                    worker_obj = None
-                if worker_obj is not None:
-                    worker_id = worker_obj.id
+            try:
+                log.debug("raw id_label for person: %r", id_label)
+                if isinstance(id_label, dict):
+                    id_label = id_label.get("code") or id_label.get("worker_code") or id_label.get("id") or str(id_label)
+                if id_label is not None and id_label != "UNID":
+                    if str(id_label).startswith("UNREG:"):
+                        worker_code = str(id_label).split(":", 1)[1].strip()
+                    else:
+                        worker_code = str(id_label).strip()
+                    try:
+                        worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
+                    except Exception:
+                        worker_obj = None
+                    if worker_obj is None:
+                        try:
+                            if worker_code.isdigit():
+                                worker_obj = sess.query(Worker).filter(Worker.worker_code == int(worker_code)).first()
+                        except Exception:
+                            pass
+                    if worker_obj is None:
+                        try:
+                            worker_obj = sess.query(Worker).filter(Worker.worker_code.ilike(f"%{worker_code}%")).first()
+                        except Exception:
+                            pass
+                    if worker_obj is not None:
+                        worker_id = worker_obj.id
+                log.debug("worker_code='%s' -> worker_obj_id=%s", worker_code, getattr(worker_obj, "id", None))
+            except Exception:
+                worker_obj = None
             if violations and worker_obj is not None:
                 snap_bytes = None
                 try:

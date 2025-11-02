@@ -1,4 +1,3 @@
-// frontend/src/pages/Incidents.jsx
 import React, { useState, useEffect } from "react";
 import { FaEye } from "react-icons/fa";
 import { FiSearch } from "react-icons/fi";
@@ -42,9 +41,7 @@ export default function Incident() {
             status: r.status || "Pending",
           }))
         );
-      } catch (err) {
-        console.error("Error fetching violations:", err);
-      }
+      } catch (err) {}
     };
     fetchViolations();
   }, []);
@@ -61,9 +58,7 @@ export default function Incident() {
         const data = res.data;
         const arr = Array.isArray(data) ? data : data?.cameras || [];
         setCameraOptions(arr);
-      } catch (err) {
-        console.error("Error fetching cameras:", err);
-      }
+      } catch (err) {}
     };
     fetchCameras();
   }, []);
@@ -112,8 +107,32 @@ export default function Incident() {
     }
   };
 
+  const normalizeViolationForModal = (n) => {
+    const snapshot = n.snapshot && typeof n.snapshot === "object"
+      ? (n.snapshot.base64 || n.snapshot.data || n.snapshot)
+      : n.snapshot;
+    const created_at = n.created_at || n.date || new Date().toISOString();
+    const workerField = n.worker || n.worker_name || n.worker_code || "Unknown Worker";
+    let workerStr = "Unknown Worker";
+    if (typeof workerField === "string") workerStr = workerField;
+    else if (typeof workerField === "object") {
+      workerStr = workerField.fullName || workerField.name || workerField.firstName || `${workerField.first || ""} ${workerField.last || ""}`.trim() || JSON.stringify(workerField);
+    } else workerStr = String(workerField);
+    return {
+      id: n.violation_id || n.id,
+      worker: workerStr,
+      worker_code: n.worker_code,
+      violation: n.violation,
+      camera: n.camera,
+      status: n.status,
+      created_at,
+      snapshot,
+    };
+  };
+
   const handleView = (violation) => {
-    setSelectedViolation(violation);
+    const norm = normalizeViolationForModal(violation);
+    setSelectedViolation(norm);
     setShowModal(true);
   };
 
@@ -126,7 +145,6 @@ export default function Incident() {
       setNotifications((prev) => prev.map((v) => v.id === selectedViolation.id ? { ...v, status: data.status || newStatus } : v));
       setSelectedViolation((prev) => ({ ...prev, status: data.status || newStatus }));
     } catch (err) {
-      console.error("Error updating violation status:", err);
     } finally {
       setUpdating(false);
     }
@@ -263,9 +281,7 @@ export default function Incident() {
               const data = res.data;
               setNotifications((prev) => prev.map((v) => v.id === selectedViolation.id ? { ...v, status: data.status || newStatus } : v));
               setSelectedViolation((prev) => ({ ...prev, status: data.status || newStatus }));
-            } catch (err) {
-              console.error("Error updating status:", err);
-            }
+            } catch (err) {}
           }}
         />
       )}

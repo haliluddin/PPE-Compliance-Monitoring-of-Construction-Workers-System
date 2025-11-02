@@ -1,4 +1,3 @@
-// frontend/src/pages/Notifications.jsx
 import { useEffect, useState } from "react";
 import API from "../api";
 import { FaExclamationCircle } from "react-icons/fa";
@@ -8,8 +7,31 @@ import { useUnread } from "../context/UnreadContext";
 import ViolationModal from "../components/ViolationModal";
 import { WS_BASE } from "../config";
 
-const audio = new Audio("/notification.mp3");
-audio.preload = "auto";
+function playNotificationSound() {
+  const tryPlay = async () => {
+    try {
+      const a = new Audio("/notification.mp3");
+      a.volume = 0.9;
+      await a.play();
+    } catch (e) {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sine";
+        o.frequency.value = 880;
+        g.gain.value = 0.02;
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start();
+        setTimeout(() => { try { o.stop(); ctx.close(); } catch (err) {} }, 140);
+      } catch (err) {}
+    }
+  };
+  tryPlay();
+}
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
@@ -26,10 +48,10 @@ export default function Notifications() {
 
   useEffect(() => {
     const unlockAudio = () => {
-      audio.play().then(() => {
-        audio.pause();
-        audio.currentTime = 0;
-      }).catch(console.error);
+      try {
+        const a = new Audio("/notification.mp3");
+        a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
+      } catch (e) {}
       window.removeEventListener("click", unlockAudio);
     };
     window.addEventListener("click", unlockAudio, { once: true });
@@ -51,9 +73,7 @@ export default function Notifications() {
         const res = await API.get("/cameras");
         const data = res.data;
         setCameraOptions((Array.isArray(data) ? data : data?.cameras || []).map((c) => c.name || c.location || `Camera ${c.id}`));
-      } catch (err) {
-        console.error(err);
-      }
+      } catch (err) {}
     };
     fetchCameras();
   }, []);
@@ -76,12 +96,10 @@ export default function Notifications() {
           date: n.date || (n.created_at ? new Date(n.created_at).toLocaleDateString() : ""),
           time: n.time || (n.created_at ? new Date(n.created_at).toLocaleTimeString() : ""),
           isNew: typeof n.is_read !== "undefined" ? !n.is_read : !(n.is_read === true),
-          status: n.status || "Pending"
+          status: n.status || "Pending",
         }));
         setNotifications(mapped);
-      } catch (err) {
-        console.error(err);
-      }
+      } catch (err) {}
     };
     loadNotifications();
   }, []);
@@ -113,14 +131,13 @@ export default function Notifications() {
     const wsBaseClean = (WS_BASE || window.location.origin.replace(/^http/, "ws")).replace(/\/+$/, "");
     const wsUrl = `${wsBaseClean}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
     const ws = new WebSocket(wsUrl);
-    ws.onopen = () => console.log("Connected to notification WebSocket");
+    ws.onopen = () => {};
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         const isNewViolation = data.violation_id && !notifications.some((n) => n.violation_id === data.violation_id);
         if (isNewViolation) {
-          audio.currentTime = 0;
-          audio.play().catch(console.error);
+          playNotificationSound();
           if (Notification.permission === "granted") {
             new Notification("Violation Detected!", {
               body: `${data.worker_name || "Unknown Worker"} - ${data.violation_type || data.message}`,
@@ -157,16 +174,11 @@ export default function Notifications() {
           }
           return prev;
         });
-        if (selectedViolation && selectedViolation.id === data.violation_id) {
-          setSelectedViolation((prev) => ({ ...prev, status: data.status || prev.status }));
-        }
-      } catch (err) {
-        console.error("ws message parse error", err);
-      }
+      } catch (err) {}
     };
-    ws.onclose = () => console.log("WebSocket disconnected");
+    ws.onclose = () => {};
     return () => ws.close();
-  }, [notifications, selectedViolation]);
+  }, [notifications]);
 
   const toggleMenu = (id) => setOpenMenu(openMenu === id ? null : id);
 
@@ -174,16 +186,34 @@ export default function Notifications() {
     try {
       await API.post(`/notifications/${id}/mark_read`);
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isNew: false } : n)));
-    } catch (err) {
-      console.error("Failed to mark notification as read", err);
-    }
+    } catch (err) {}
   };
 
-  const menuActions = [
-    { label: "Mark as Read", onClick: markAsRead },
-    { label: "Delete Notification", onClick: (id) => alert(`Delete ${id}`) },
-    { label: "Report Issue", onClick: (id) => alert(`Report issue for ${id}`) },
-  ];
+  const normalizeViolationForModal = (n) => {
+    const snapshot = n.snapshot && typeof n.snapshot === "object"
+      ? (n.snapshot.base64 || n.snapshot.data || n.snapshot)
+      : n.snapshot;
+    const created_at = n.created_at || n.date || new Date().toISOString();
+    const workerField = n.worker || n.worker_name || n.worker_code || "Unknown Worker";
+    let workerStr = "Unknown Worker";
+    if (typeof workerField === "string") workerStr = workerField;
+    else if (typeof workerField === "object") {
+      workerStr = workerField.fullName || workerField.name || workerField.firstName || `${workerField.first || ""} ${workerField.last || ""}`.trim() || JSON.stringify(workerField);
+    } else workerStr = String(workerField);
+    return {
+      id: n.violation_id || n.id,
+      notificationId: n.id,
+      worker: workerStr,
+      worker_code: n.worker_code,
+      violation: n.violation,
+      camera: n.camera,
+      type: n.type,
+      status: n.status,
+      isNew: n.isNew,
+      created_at,
+      snapshot,
+    };
+  };
 
   const handleChange = (filterName, value) => {
     setFilters((prev) => ({ ...prev, [filterName]: value }));
@@ -321,7 +351,7 @@ export default function Notifications() {
                     <div className="flex items-center gap-2 mt-1">
                       <p className="text-gray-300 text-sm">{n.violation}</p>
                       {n.status && (
-                        <span className={`inline-flex items-center mt-2 px-2.5 py-1 text-xs font-semibold rounded-full border ${n.status.toLowerCase() === "resolved" ? "bg-green-500/20 text-green-400 border-green-600/50" : n.status.toLowerCase() === "false positive" ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50" : n.status.toLowerCase() === "pending" ? "bg-red-500/20 text-red-400 border-red-600/50" : "bg-gray-500/20 text-gray-300 border-gray-600/50"}`}>
+                        <span className={`inline-flex items-center mt-2 px-2.5 py-1 text-xs font-semibold rounded-full border ${n.status.toLowerCase() === "resolved" ? "bg-green-500/20 text-green-400 border-green-600/50" : n.status.toLowerCase() === "false positive" ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50" : "bg-red-500/20 text-red-400 border-red-600/50"}`}>
                           {n.status}
                         </span>
                       )}
@@ -333,19 +363,8 @@ export default function Notifications() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        setSelectedViolation({
-                          id: n.violation_id,
-                          notificationId: n.id,
-                          worker: n.worker,
-                          worker_code: n.worker_code,
-                          violation: n.violation,
-                          camera: n.camera,
-                          type: n.type,
-                          status: n.status,
-                          isNew: n.isNew,
-                          date: n.date,
-                          time: n.time,
-                        });
+                        const norm = normalizeViolationForModal(n);
+                        setSelectedViolation(norm);
                         setShowModal(true);
                         if (n.isNew) markAsRead(n.id);
                       }}
@@ -368,7 +387,7 @@ export default function Notifications() {
           onStatusChange={async (newStatus) => {
             try {
               const token = localStorage.getItem("token");
-              const res = await fetch(`${API_BASE}/violations/${selectedViolation.id}/status`, {
+              const res = await fetch(`${API_BASE || ""}/violations/${selectedViolation.id}/status`, {
                 method: "PUT",
                 headers: {
                   "Content-Type": "application/json",
@@ -384,9 +403,7 @@ export default function Notifications() {
                 )
               );
               setSelectedViolation((prev) => ({ ...prev, status: newStatus }));
-            } catch (err) {
-              console.error("Error updating status:", err);
-            }
+            } catch (err) {}
           }}
         />
       )}
