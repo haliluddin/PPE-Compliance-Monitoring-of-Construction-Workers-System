@@ -540,15 +540,36 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
         rows = q.order_by(Violation.id.desc()).offset(offset).limit(limit).all()
         out = []
         for r in rows:
+            worker_name = None
+            try:
+                if getattr(r, "worker", None):
+                    worker_obj = r.worker
+                    worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+            except Exception:
+                worker_name = None
+            if not worker_name:
+                worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
+            camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else ""
+            try:
+                cam = getattr(r, "camera", None)
+                if cam:
+                    camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                    camera_location = getattr(cam, "location", "") or camera_name
+            except Exception:
+                pass
             out.append({
                 "id": r.id,
                 "job_id": r.job_id,
                 "camera_id": r.camera_id,
                 "worker_code": r.worker_code,
+                "worker": worker_name,
                 "violation_types": r.violation_types,
                 "frame_index": r.frame_index,
                 "created_at": r.created_at,
-                "status": getattr(r, "status", "Pending")
+                "status": getattr(r, "status", "Pending"),
+                "camera": camera_name,
+                "camera_location": camera_location
             })
         return out
     finally:
@@ -566,14 +587,32 @@ def get_notifications(limit: int = 100, offset: int = 0):
         rows = sess.query(Violation).order_by(Violation.id.desc()).offset(offset).limit(limit).all()
         out = []
         for r in rows:
+            worker_name = None
+            try:
+                if getattr(r, "worker", None):
+                    worker_obj = r.worker
+                    worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+            except Exception:
+                worker_name = None
+            if not worker_name:
+                worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
+            camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else ""
+            try:
+                cam = getattr(r, "camera", None)
+                if cam:
+                    camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                    camera_location = getattr(cam, "location", "") or camera_name
+            except Exception:
+                pass
             out.append({
                 "id": r.id,
                 "violation_id": r.id,
-                "worker_name": getattr(r, "worker", None) or getattr(r, "worker_name", None) or "Unknown Worker",
+                "worker_name": worker_name,
                 "worker_code": getattr(r, "worker_code", None) or "N/A",
                 "violation_type": getattr(r, "violation_types", None) or "Unknown Violation",
-                "camera": getattr(r, "camera_name", None) or getattr(r, "camera_id", None) or "Unknown Camera",
-                "camera_location": getattr(r, "camera_location", None) or "",
+                "camera": camera_name,
+                "camera_location": camera_location,
                 "created_at": r.created_at,
                 "is_read": getattr(r, "is_read", False),
                 "status": getattr(r, "status", "Pending"),
@@ -649,10 +688,21 @@ def quick_reports(period: str = "today"):
         camera_counts = {}
         resolved = 0
         for v in rows:
-            code = getattr(v, "worker_code", "UNKNOWN")
-            counts[code] = counts.get(code, 0) + 1
-            cam = getattr(v, "camera_name", None) or getattr(v, "camera_id", None) or "Unknown"
-            camera_counts[cam] = camera_counts.get(cam, 0) + 1
+            worker_display = None
+            try:
+                if getattr(v, "worker", None):
+                    worker_display = getattr(v.worker, "fullName", None) or getattr(v.worker, "name", None)
+            except Exception:
+                worker_display = None
+            if not worker_display:
+                worker_display = getattr(v, "worker", None) or getattr(v, "worker_name", None) or getattr(v, "worker_code", "UNKNOWN")
+            counts[worker_display] = counts.get(worker_display, 0) + 1
+            cam = getattr(v, "camera", None)
+            if cam:
+                cam_key = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+            else:
+                cam_key = "Video Upload" if getattr(v, "camera_id", None) is None else "Unknown"
+            camera_counts[cam_key] = camera_counts.get(cam_key, 0) + 1
             if getattr(v, "status", "").lower() == "resolved":
                 resolved += 1
         top_offenders = [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
@@ -722,13 +772,30 @@ def reports_export(period: str = "today"):
         cw = csv.writer(si)
         cw.writerow(["id", "worker_code", "worker_name", "violation_types", "camera", "camera_location", "created_at", "status"])
         for v in rows:
+            worker_name = ""
+            try:
+                if getattr(v, "worker", None):
+                    worker_name = getattr(v.worker, "fullName", None) or getattr(v.worker, "name", None)
+            except Exception:
+                worker_name = ""
+            if not worker_name:
+                worker_name = getattr(v, "worker_name", None) or getattr(v, "worker", None) or ""
+            cam_name = "Video Upload" if getattr(v, "camera_id", None) is None else ""
+            cam_loc = "Video Upload" if getattr(v, "camera_id", None) is None else ""
+            try:
+                cam = getattr(v, "camera", None)
+                if cam:
+                    cam_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                    cam_loc = getattr(cam, "location", "") or cam_name
+            except Exception:
+                pass
             cw.writerow([
                 getattr(v, "id", ""),
                 getattr(v, "worker_code", ""),
-                getattr(v, "worker", "") or getattr(v, "worker_name", ""),
+                worker_name,
                 getattr(v, "violation_types", "") or getattr(v, "violation_type", ""),
-                getattr(v, "camera_name", "") or getattr(v, "camera_id", ""),
-                getattr(v, "camera_location", "") or "",
+                cam_name,
+                cam_loc,
                 getattr(v, "created_at", ""),
                 getattr(v, "status", "Pending")
             ])

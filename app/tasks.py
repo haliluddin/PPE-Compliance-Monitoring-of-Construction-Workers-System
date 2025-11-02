@@ -385,17 +385,29 @@ def _process_image(image_bytes, meta=None):
             worker_code = None
             worker_id = None
             worker_obj = None
+            display_name = None
             if id_label is not None and id_label != "UNID":
-                if str(id_label).startswith("UNREG:"):
-                    worker_code = str(id_label).split(":", 1)[1]
+                if isinstance(id_label, dict):
+                    worker_code = id_label.get("worker_code") or id_label.get("worker") or id_label.get("code") or None
+                    display_name = id_label.get("fullName") or id_label.get("full_name") or id_label.get("name") or None
                 else:
-                    worker_code = str(id_label)
+                    s = str(id_label)
+                    if s.startswith("UNREG:"):
+                        worker_code = s.split(":", 1)[1]
+                    else:
+                        worker_code = s
                 try:
-                    worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
+                    if worker_code:
+                        worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
                 except Exception:
                     worker_obj = None
                 if worker_obj is not None:
                     worker_id = worker_obj.id
+                    if not display_name:
+                        try:
+                            display_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+                        except Exception:
+                            display_name = None
             if violations and worker_obj is not None:
                 snap_bytes = None
                 try:
@@ -424,13 +436,20 @@ def _process_image(image_bytes, meta=None):
                 should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
                 if should_save_violation:
                     try:
-                        v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=";".join(violations), frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
+                        vtypes = ", ".join([str(x).replace("_", " ").title() for x in violations]) if violations else ""
+                        v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=vtypes, frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
+                        if worker_obj is not None:
+                            try:
+                                v.worker = worker_obj
+                            except Exception:
+                                pass
                         sess.add(v)
                         sess.commit()
                         sess.refresh(v)
                     except Exception:
                         sess.rollback()
-            publish_people.append({"bbox": p.get("bbox"), "id": id_label, "violations": violations})
+            id_for_publish = display_name if display_name else (worker_code if worker_code else (str(id_label) if id_label is not None else None))
+            publish_people.append({"bbox": p.get("bbox"), "id": id_for_publish, "violations": violations})
         annotated_b64 = None
         if annotated is not None:
             try:
