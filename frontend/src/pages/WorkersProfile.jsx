@@ -14,7 +14,6 @@ export default function WorkersProfile() {
   const navigate = useNavigate();
   const [selectedViolation, setSelectedViolation] = useState(null);
   const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
-
   const [workerData, setWorkerData] = useState(null);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
@@ -28,64 +27,45 @@ export default function WorkersProfile() {
       try {
         const res = await API.get(`/workers/${id}`);
         const data = res.data;
-
         const total = data.violationHistory?.length || 0;
         data.resolutionRate = total > 0
         ? Math.round(
             (data.violationHistory.filter(v => (v.status || '').toLowerCase() === 'resolved').length / total) * 100
           )
         : 0;
-
-        const sortedViolations = (data.violationHistory || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-        data.lastViolationDate = sortedViolations?.[0]?.date || null;
+        const sortedViolations = (data.violationHistory || []).slice().sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+        data.lastViolationDate = sortedViolations?.[0]?.date || sortedViolations?.[0]?.created_at || null;
         data.totalViolations = total;
         data.resolvedViolations = (data.violationHistory || []).filter(v => (v.status || '').toLowerCase() === 'resolved').length || 0;
-
-        // normalize violation entries
-        data.violationHistory = (data.violationHistory || []).map(v => {
-          let workerName = "Unknown";
-          if (v.worker_name) workerName = v.worker_name;
-          else if (v.worker && typeof v.worker === 'string') workerName = v.worker;
-          else if (v.worker && typeof v.worker === 'object') workerName = v.worker.fullName || v.worker.name || JSON.stringify(v.worker);
-          else if (data.fullName) workerName = data.fullName;
-          return {
-            ...v,
-            worker: workerName,
-            snapshot: v.snapshot || v.snapshot_b64 || v.snapshot?.base64 || null,
-            violation: v.violation_types || v.violation || ""
-          };
-        });
-
         setWorkerData(data);
       } catch (error) {
         console.error("Failed to fetch worker profile:", error);
         setWorkerData(null);
       }
     };
-
     fetchWorker();
   }, [id]);
 
   const filterViolations = () => {
     if (!workerData?.violationHistory) return [];
-
     let filtered = workerData.violationHistory.filter(violation => {
-      const matchesType = selectedType === 'All' || (violation.violation || "").toLowerCase().includes(selectedType.toLowerCase());
-      const matchesStatus = statusFilter === 'All' || (violation.status || '').toLowerCase() === statusFilter.toLowerCase();
+      const vtype = violation.type || violation.violation || violation.violation_type || violation.violation_types || "Unknown";
+      const cameraLoc = violation.cameraLocation || violation.camera_location || violation.camera || violation.camera_name || "";
+      const matchesType = selectedType === 'All' || vtype === selectedType;
+      const matchesStatus = statusFilter === 'All' || (violation.status || "").toLowerCase() === statusFilter.toLowerCase();
       const matchesSearch = !searchQuery ||
         Object.values(violation).some(
           val => String(val).toLowerCase().includes(searchQuery.toLowerCase())
         );
-
       return matchesType && matchesStatus && matchesSearch;
     });
-
     filtered.sort((a, b) => {
-      if (sortBy === 'Newest') return new Date(b.date) - new Date(a.date);
-      if (sortBy === 'Oldest') return new Date(a.date) - new Date(b.date);
+      const da = new Date(a.date || a.created_at || 0);
+      const db = new Date(b.date || b.created_at || 0);
+      if (sortBy === 'Newest') return db - da;
+      if (sortBy === 'Oldest') return da - db;
       return 0;
     });
-
     return filtered;
   };
 
@@ -108,9 +88,17 @@ export default function WorkersProfile() {
   }
 
   const openViolationModal = (violation) => {
-    const snapshotRaw = violation.snapshot || violation.snapshot_b64 || violation.snapshot?.base64;
-    const snapshot = snapshotRaw ? (String(snapshotRaw).startsWith("data:") ? snapshotRaw : `data:image/jpeg;base64,${String(snapshotRaw)}`) : null;
-    setSelectedViolation({ ...violation, snapshot });
+    const norm = {
+      id: violation.id || violation.violation_id,
+      worker: workerData.fullName || workerData.name,
+      worker_code: workerData.worker_code || workerData.workerCode,
+      violation: violation.type || violation.violation || violation.violation_types || violation.violation_type,
+      camera: violation.cameraLocation || violation.camera_location || violation.camera || violation.camera_name || "N/A",
+      status: violation.status || "Pending",
+      created_at: violation.date || violation.created_at,
+      snapshot: violation.snapshot || violation.snapshot_b64 || violation.snapshot_base64 || null
+    };
+    setSelectedViolation(norm);
     setIsViolationModalOpen(true);
   };
 
@@ -121,13 +109,12 @@ export default function WorkersProfile() {
 
   const handleStatusChange = async (newStatus) => {
     if (!selectedViolation) return;
-
     try {
-      const res = await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
+      await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
       setWorkerData((prev) => ({
         ...prev,
         violationHistory: prev.violationHistory.map((v) =>
-          v.id === selectedViolation.id ? { ...v, status: newStatus } : v
+          (v.id === selectedViolation.id || v.violation_id === selectedViolation.id) ? { ...v, status: newStatus } : v
         ),
       }));
       setSelectedViolation((prev) => ({ ...prev, status: newStatus }));
@@ -138,16 +125,13 @@ export default function WorkersProfile() {
 
   const exportToPDF = () => {
     if (!workerData) return;
-
     const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
     const margin = 40;
     let yPos = 40;
-
     doc.setFontSize(18);
     doc.setTextColor(33, 33, 33);
     doc.text(`Worker Report`, margin, yPos);
     yPos += 25;
-
     doc.setFontSize(14);
     doc.setTextColor(55, 55, 55);
     doc.text(`Name: ${workerData.fullName}`, margin, yPos);
@@ -156,34 +140,23 @@ export default function WorkersProfile() {
     yPos += 20;
     doc.text(`Status: ${workerData.status}`, margin, yPos);
     yPos += 20;
-    doc.text(
-      `Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`,
-      margin,
-      yPos
-    );
+    doc.text(`Date Added: ${workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString() : 'N/A'}`, margin, yPos);
     yPos += 20;
     doc.text(`Total Violations: ${workerData.totalViolations}`, margin, yPos);
     yPos += 20;
-    doc.text(
-      `Violation Resolution Rate: ${workerData.resolutionRate}% (${workerData.resolvedViolations} resolved out of ${workerData.totalViolations})`,
-      margin,
-      yPos
-    );
+    doc.text(`Violation Resolution Rate: ${workerData.resolutionRate}% (${workerData.resolvedViolations} resolved out of ${workerData.totalViolations})`, margin, yPos);
     yPos += 30;
-
     doc.setDrawColor(200, 200, 200);
     doc.setLineWidth(0.5);
     doc.line(margin, yPos, 555, yPos);
     yPos += 15;
-
     const tableColumn = ["Date & Time", "Violation Type", "Camera Location", "Status"];
     const tableRows = (workerData.violationHistory || []).map(v => [
-      new Date(v.date).toLocaleString(),
-      v.violation,
-      v.cameraLocation || v.camera || "",
-      (v.status || "").charAt(0).toUpperCase() + (v.status || "").slice(1)
+      new Date(v.date || v.created_at).toLocaleString(),
+      v.type || v.violation || v.violation_type || v.violation_types || "Unknown",
+      v.cameraLocation || v.camera_location || v.camera || v.camera_name || "N/A",
+      (v.status || "Pending").charAt(0).toUpperCase() + (v.status || "Pending").slice(1)
     ]);
-
     autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
@@ -205,12 +178,10 @@ export default function WorkersProfile() {
         doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`, 555, 820, { align: "right" });
       },
     });
-
     const safeName = (workerData.fullName || "worker").replace(/[^a-z0-9]/gi, '_');
     const today = new Date();
     const dateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const fileName = `${safeName}_${dateString}_Report.pdf`;
-
     doc.save(fileName);
   };
 
@@ -229,20 +200,12 @@ export default function WorkersProfile() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-gray-700/50 border-2 border-gray-600 flex items-center justify-center flex-shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 md:h-10 md:w-10 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                  <circle cx="12" cy="7" r="4"></circle>
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 md:h-10 md:w-10 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
               </div>
-
               <div>
                 <div className="flex items-center space-x-3">
                   <h1 className="text-xl md:text-2xl font-bold text-white">{workerData.fullName || workerData.name}</h1>
-                  <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${
-                    workerData.status === 'Active' ? 'bg-green-900/30 text-green-300 border border-green-800/50' :
-                    workerData.status === 'Inactive' ? 'bg-red-900/30 text-red-300 border border-red-800/50' :
-                    'bg-yellow-900/30 text-yellow-300 border border-yellow-800/50'
-                  }`}>
+                  <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${workerData.status === 'Active' ? 'bg-green-900/30 text-green-300 border border-green-800/50' : workerData.status === 'Inactive' ? 'bg-red-900/30 text-red-300 border border-red-800/50' : 'bg-yellow-900/30 text-yellow-300 border border-yellow-800/50'}`}>
                     {workerData.status || 'Active'}
                   </span>
                 </div>
@@ -258,9 +221,7 @@ export default function WorkersProfile() {
               className="text-gray-400 hover:text-white transition-colors p-2 -mr-2"
               aria-label={isDetailsExpanded ? 'Hide details' : 'Show details'}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 transform transition-transform duration-200 ${isDetailsExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 transform transition-transform duration-200 ${isDetailsExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
             </button>
           </div>
 
@@ -269,19 +230,11 @@ export default function WorkersProfile() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Date Added</p>
-                  <p className="text-white font-medium">
-                    {workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric'
-                    }) : 'N/A'}
-                  </p>
+                  <p className="text-white font-medium">{workerData.dateAdded ? new Date(workerData.dateAdded).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Last Active</p>
-                  <p className="text-white font-medium">
-                    {workerData.lastActive ? new Date(workerData.lastActive).toLocaleString() : 'N/A'}
-                  </p>
+                  <p className="text-white font-medium">{workerData.lastActive ? new Date(workerData.lastActive).toLocaleString() : 'N/A'}</p>
                 </div>
               </div>
             </div>
@@ -296,17 +249,13 @@ export default function WorkersProfile() {
               <p className="text-sm text-gray-400">Total Violations</p>
               <p className="text-2xl font-bold text-white mt-1">{workerData.totalViolations || 0}</p>
               <div className="mt-2">
-                <span className={`text-xs font-medium ${
-                  workerData.totalViolations > 10 ? 'text-red-400' : 'text-green-400'
-                }`}>
+                <span className={`text-xs font-medium ${workerData.totalViolations > 10 ? 'text-red-400' : 'text-green-400'}`}>
                   {workerData.totalViolations > 10 ? 'Needs Attention' : 'Within Limits'}
                 </span>
               </div>
             </div>
             <div className="p-4 bg-red-500/10 rounded-lg flex items-center justify-center ml-6">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
             </div>
           </div>
         </div>
@@ -314,7 +263,7 @@ export default function WorkersProfile() {
         <div className="bg-[#2A2B30] p-4 rounded-xl shadow-lg">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm text-gray-400">Violation Resolution Rate</p>
+             <p className="text-sm text-gray-400">Violation Resolution Rate</p>
               <p className="text-2xl font-bold text-white mt-1">
                 {workerData.resolutionRate || 0}%
               </p>
@@ -322,9 +271,7 @@ export default function WorkersProfile() {
                 {workerData.resolvedViolations || 0} resolved out of {workerData.totalViolations || 0}
               </p>
               <div className="mt-2">
-                <span className={`text-xs font-medium ${
-                  workerData.resolutionRate < 80 ? 'text-yellow-400' : 'text-green-400'
-                }`}>
+                <span className={`text-xs font-medium ${workerData.resolutionRate < 80 ? 'text-yellow-400' : 'text-green-400'}`}>
                   {workerData.resolutionRate < 80 ? 'Needs Improvement' : 'Good'}
                 </span>
               </div>
@@ -344,7 +291,7 @@ export default function WorkersProfile() {
               </p>
               <div className="mt-2">
                 <span className="text-xs text-gray-400 font-medium">
-                  {workerData.violationHistory?.[0]?.type || 'No violations'}
+                  {workerData.violationHistory?.[0]?.type || workerData.violationHistory?.[0]?.violation || 'No violations'}
                 </span>
               </div>
             </div>
@@ -375,23 +322,17 @@ export default function WorkersProfile() {
                 className="filter-button flex items-center space-x-2 px-4 py-2 bg-[#1E1F23] rounded-md text-gray-300 hover:bg-[#2A2B30]"
                 onClick={() => setShowFilter(!showFilter)}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 4h18M6 12h12M10 20h4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 4h18M6 12h12M10 20h4" /></svg>
                 <span>Filter</span>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 9l-7 7-7-7" /></svg>
               </button>
 
               {showFilter && (
-                <div 
-                  className="filter-dropdown absolute right-0 mt-2 w-80 bg-[#2A2B30] rounded-md shadow-lg p-4 z-10 border border-gray-700"
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <div className="filter-dropdown absolute right-0 mt-2 w-80 bg-[#2A2B30] rounded-md shadow-lg p-4 z-10 border border-gray-700" onClick={(e) => e.stopPropagation()}>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-1">Sort By</label>
-                      <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
-                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
-                      >
+                      <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200">
                         <option value="Newest">Newest</option>
                         <option value="Oldest">Oldest</option>
                       </select>
@@ -399,11 +340,7 @@ export default function WorkersProfile() {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-1">Status</label>
-                      <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
-                      >
+                      <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200">
                         <option value="All">All</option>
                         <option value="resolved">Resolved</option>
                         <option value="pending">Pending</option>
@@ -413,42 +350,22 @@ export default function WorkersProfile() {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-1">Violation Type</label>
-                      <select
-                        value={selectedType}
-                        onChange={(e) => setSelectedType(e.target.value)}
-                        className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200"
-                      >
+                      <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)} className="w-full bg-[#1E1F23] border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200">
                         <option value="All">All Types</option>
                         <option value="No Helmet">No Helmet</option>
                         <option value="No Vest">No Vest</option>
-                        <option value="No Right Glove">No Right Glove</option>
-                        <option value="No Left Glove">No Left Glove</option>
-                        <option value="No Right Shoe">No Right Shoe</option>
-                        <option value="No Left Shoe">No Left Shoe</option>
+                        <option value="No Gloves">No Gloves</option>
+                        <option value="No Boots">No Boots</option>
                       </select>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setSortBy('Newest');
-                        setStatusFilter('All');
-                        setSelectedType('All');
-                        setShowFilter(false);
-                      }}
-                      className="w-full mt-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-indigo-700"
-                    >
-                      Clear Filters
-                    </button>
+                    <button onClick={() => { setSortBy('Newest'); setStatusFilter('All'); setSelectedType('All'); setShowFilter(false); }} className="w-full mt-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-indigo-700">Clear Filters</button>
                   </div>
                 </div>
               )}
-
             </div>
             <div className="flex space-x-2">
-              <button 
-                className="px-3 py-3 text-xs font-medium text-white bg-blue rounded-md hover:bg-[#5388DF] transition-colors"
-                onClick={exportToPDF}
-              >
+              <button className="px-3 py-3 text-xs font-medium text-white bg-blue rounded-md hover:bg-[#5388DF]" onClick={exportToPDF}>
                 Export to PDF
               </button>
             </div>
@@ -470,33 +387,17 @@ export default function WorkersProfile() {
             <tbody className="space-y-2">
               {filterViolations().length > 0 ? (
                 filterViolations().map((violation, index) => (
-                  <tr 
-                    key={index} 
-                    className="grid grid-cols-5 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center"
-                  >
-                    <td className="text-gray-300">{violation.date ? new Date(violation.date).toLocaleString() : '-'}</td>
-                    <td className="text-gray-300">{violation.violation}</td>
-                    <td className="text-gray-300">{violation.cameraLocation || violation.camera || 'Unknown'}</td>
+                  <tr key={index} className="grid grid-cols-5 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center">
+                    <td className="text-gray-300">{new Date(violation.date || violation.created_at).toLocaleString()}</td>
+                    <td className="text-gray-300">{violation.type || violation.violation || violation.violation_type || violation.violation_types || 'N/A'}</td>
+                    <td className="text-gray-300">{violation.cameraLocation || violation.camera_location || violation.camera || violation.camera_name || 'Unknown - N/A'}</td>
                     <td>
-                      <span
-                        className={`px-3 py-1 text-xs font-medium rounded-full border ${
-                          (violation.status || "pending").toLowerCase() === "resolved"
-                            ? "bg-green-500/20 text-green-400 border-green-600/50"
-                            : (violation.status || "pending").toLowerCase() === "pending"
-                            ? "bg-red-500/20 text-red-400 border-red-600/50"
-                            : (violation.status || "pending").toLowerCase() === "false positive"
-                            ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50"
-                            : "bg-blue-900/30 text-blue-300 border-gray-700"
-                        }`}
-                      >
+                      <span className={`px-3 py-1 text-xs font-medium rounded-full border ${ (violation.status || '').toLowerCase() === "resolved" ? "bg-green-500/20 text-green-400 border-green-600/50" : (violation.status || '').toLowerCase() === "pending" ? "bg-red-500/20 text-red-400 border-red-600/50" : (violation.status || '').toLowerCase() === "false positive" ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50" : "bg-blue-900/30 text-blue-300 border-gray-700" }`}>
                         {violation.status || "Pending"}
                       </span>
                     </td>
                     <td className="text-gray-300">
-                      <button
-                        onClick={() => openViolationModal(violation)}
-                        className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors"
-                      >
+                      <button onClick={() => openViolationModal(violation)} className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-[#5388DF] rounded-md hover:bg-[#19325C] transition-colors">
                         <FaEye className="mr-2" />
                         View
                       </button>
@@ -505,9 +406,7 @@ export default function WorkersProfile() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="5" className="px-6 py-4 text-center text-sm text-gray-400">
-                    No violation records found
-                  </td>
+                  <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-400">No violation records found</td>
                 </tr>
               )}
             </tbody>
@@ -518,23 +417,10 @@ export default function WorkersProfile() {
         <ViolationModal
           violation={selectedViolation}
           onClose={closeViolationModal}
-          onStatusChange={async (newStatus) => {
-            try {
-              const res = await API.put(`/violations/${selectedViolation.id}/status`, { status: newStatus });
-              const data = res.data;
-              setWorkerData(prev => {
-                const updatedHistory = prev.violationHistory.map(v =>
-                  v.id === selectedViolation.id ? { ...v, status: newStatus } : v
-                );
-                return { ...prev, violationHistory: updatedHistory };
-              });
-              setSelectedViolation(prev => ({ ...prev, status: newStatus }));
-            } catch (error) {
-              console.error("Failed to update status:", error);
-            }
-          }}
+          onStatusChange={handleStatusChange}
         />
       )}
     </div>
   );
 }
+

@@ -17,8 +17,9 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
 
   if (!violation) return null;
 
-  const snapshotUrl = violation.snapshot
-    ? (typeof violation.snapshot === "string" ? `data:image/jpeg;base64,${violation.snapshot}` : `data:image/jpeg;base64,${violation.snapshot}`)
+  const snapshotVal = violation.snapshot || violation.snapshot_base64 || violation.snapshot_b64 || null;
+  const snapshotUrl = snapshotVal
+    ? (typeof snapshotVal === "string" && snapshotVal.startsWith("/")) ? snapshotVal : `data:image/jpeg;base64,${snapshotVal}`
     : "https://via.placeholder.com/400x250?text=No+Snapshot+Available";
 
   const getWorkerName = (v) => {
@@ -37,6 +38,14 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
   } catch (e) {
     dateStr = String(violation.created_at || violation.date || "N/A");
   }
+
+  const getCameraDisplay = (v) => {
+    return v.camera || v.camera_location || v.cameraLocation || v.cameraLocationName || "N/A";
+  };
+
+  const getViolationType = (v) => {
+    return v.violation || v.violation_type || v.violation_types || v.type || "N/A";
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
@@ -95,7 +104,7 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
                 <FiCamera className="mr-2 text-[#5388DF]" />
                 <p>
                   <span className="text-gray-400 font-medium">Camera:</span>{" "}
-                  {violation.camera || violation.cameraLocation || "N/A"}
+                  {getCameraDisplay(violation)}
                 </p>
               </div>
 
@@ -103,7 +112,7 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
                 <FiAlertTriangle className="mr-2 text-[#5388DF]" />
                 <p>
                   <span className="text-gray-400 font-medium">Violation:</span>{" "}
-                  {violation.violation || violation.type || "N/A"}
+                  {getViolationType(violation)}
                 </p>
               </div>
 
@@ -130,3 +139,4 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
     </div>
   );
 }
+

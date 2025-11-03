@@ -21,6 +21,7 @@ import numpy as np
 import cv2
 import io
 import csv
+import base64
 try:
     import redis
 except Exception:
@@ -35,7 +36,6 @@ except Exception:
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
-import base64
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
 app.add_middleware(
@@ -550,7 +550,7 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
             if not worker_name:
                 worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
             camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
-            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else ""
+            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
             try:
                 cam = getattr(r, "camera", None)
                 if cam:
@@ -558,6 +558,16 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
                     camera_location = getattr(cam, "location", "") or camera_name
             except Exception:
                 pass
+            snapshot_b64 = None
+            try:
+                snap = getattr(r, "snapshot", None)
+                if snap:
+                    if isinstance(snap, (bytes, bytearray)):
+                        snapshot_b64 = base64.b64encode(snap).decode("ascii")
+                    elif isinstance(snap, str):
+                        snapshot_b64 = snap
+            except Exception:
+                snapshot_b64 = None
             out.append({
                 "id": r.id,
                 "job_id": r.job_id,
@@ -565,13 +575,54 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
                 "worker_code": r.worker_code,
                 "worker": worker_name,
                 "violation_types": r.violation_types,
+                "violation": r.violation_types,
                 "frame_index": r.frame_index,
                 "created_at": r.created_at,
                 "status": getattr(r, "status", "Pending"),
                 "camera": camera_name,
-                "camera_location": camera_location
+                "camera_location": camera_location,
+                "snapshot": snapshot_b64
             })
         return out
+    finally:
+        sess.close()
+@app.put("/violations/{violation_id}/status")
+def update_violation_status(violation_id: int, payload: dict = Body(...)):
+    sess = SessionLocal()
+    try:
+        v = sess.query(Violation).filter(Violation.id == violation_id).first()
+        if not v:
+            raise HTTPException(status_code=404, detail="violation not found")
+        new_status = payload.get("status")
+        if new_status is None:
+            raise HTTPException(status_code=400, detail="status required")
+        try:
+            v.status = new_status
+            sess.commit()
+            sess.refresh(v)
+        except Exception:
+            sess.rollback()
+            raise
+        notif_payload = {"type": "status_update", "violation_id": v.id, "status": v.status}
+        try:
+            if redis_sync is not None:
+                try:
+                    redis_sync.publish(WS_CHANNEL, json.dumps(notif_payload, default=str))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            loop = APP_LOOP
+            if loop:
+                for ws in list(ws_clients):
+                    try:
+                        asyncio.run_coroutine_threadsafe(ws.send_json(notif_payload), loop)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return {"id": v.id, "status": v.status}
     finally:
         sess.close()
 @app.get("/health")
@@ -597,7 +648,7 @@ def get_notifications(limit: int = 100, offset: int = 0):
             if not worker_name:
                 worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
             camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
-            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else ""
+            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
             try:
                 cam = getattr(r, "camera", None)
                 if cam:
@@ -605,18 +656,30 @@ def get_notifications(limit: int = 100, offset: int = 0):
                     camera_location = getattr(cam, "location", "") or camera_name
             except Exception:
                 pass
+            snapshot_b64 = None
+            try:
+                snap = getattr(r, "snapshot", None)
+                if snap:
+                    if isinstance(snap, (bytes, bytearray)):
+                        snapshot_b64 = base64.b64encode(snap).decode("ascii")
+                    elif isinstance(snap, str):
+                        snapshot_b64 = snap
+            except Exception:
+                snapshot_b64 = None
             out.append({
                 "id": r.id,
                 "violation_id": r.id,
                 "worker_name": worker_name,
                 "worker_code": getattr(r, "worker_code", None) or "N/A",
                 "violation_type": getattr(r, "violation_types", None) or "Unknown Violation",
+                "violation": getattr(r, "violation_types", None) or "Unknown Violation",
                 "camera": camera_name,
                 "camera_location": camera_location,
                 "created_at": r.created_at,
                 "is_read": getattr(r, "is_read", False),
                 "status": getattr(r, "status", "Pending"),
-                "type": "worker_violation"
+                "type": "worker_violation",
+                "snapshot": snapshot_b64
             })
         return out
     finally:
@@ -686,6 +749,7 @@ def quick_reports(period: str = "today"):
         total_incidents = len(rows)
         counts = {}
         camera_counts = {}
+        type_counts = {}
         resolved = 0
         for v in rows:
             worker_display = None
@@ -703,11 +767,21 @@ def quick_reports(period: str = "today"):
             else:
                 cam_key = "Video Upload" if getattr(v, "camera_id", None) is None else "Unknown"
             camera_counts[cam_key] = camera_counts.get(cam_key, 0) + 1
+            vt = getattr(v, "violation_types", None) or ""
+            if vt:
+                try:
+                    parts = [p.strip() for p in str(vt).split(",") if p.strip()]
+                    for p in parts:
+                        type_counts[p] = type_counts.get(p, 0) + 1
+                except Exception:
+                    type_counts[str(vt)] = type_counts.get(str(vt), 0) + 1
+            else:
+                type_counts["Unknown"] = type_counts.get("Unknown", 0) + 1
             if getattr(v, "status", "").lower() == "resolved":
                 resolved += 1
         top_offenders = [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
         camera_data = [{"location": k, "violations": v, "risk": "High" if v > 5 else "Medium" if v > 2 else "Low"} for k, v in camera_counts.items()]
-        most_violations = [{"name": k, "violations": v} for k, v in sorted(camera_counts.items(), key=lambda x: x[1], reverse=True)]
+        most_violations = [{"name": k, "violations": v} for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)]
         worker_data = [{"rank": i+1, "name": k, "violations": v, "resolved": 0, "resolution_rate": 0} for i, (k, v) in enumerate(sorted(counts.items(), key=lambda x: x[1], reverse=True))]
         violation_resolution_rate = round((resolved / total_incidents * 100) if total_incidents > 0 else 0, 2)
         return {
