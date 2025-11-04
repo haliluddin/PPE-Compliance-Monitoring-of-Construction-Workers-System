@@ -185,61 +185,63 @@ def get_performance_data(
     period: str = Query("today", description="Period filter: today | last_week | last_month")
 ):
     user_id = current_user.id
+    
+    # Calculate date range
     now = datetime.now(timezone(timedelta(hours=8)))
-
-    # Define date range
     if period == "last_week":
-        end_date = datetime(now.year, now.month, now.day)
-        start_date = end_date - timedelta(days=7)
+        start_date = now - timedelta(days=7)
     elif period == "last_month":
-        end_date = datetime(now.year, now.month, now.day)
-        start_date = end_date - timedelta(days=30)
+        start_date = now - timedelta(days=30)
     else:
-        start_date = datetime(now.year, now.month, now.day)
-        end_date = start_date + timedelta(days=1)
-
-    date_filter = and_(Violation.created_at >= start_date, Violation.created_at < end_date, Violation.user_id == user_id)
-
-    # --- Performance Over Time (daily counts) ---
-  
-
-    daily_stats = (
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Get top offenders with violation counts
+    top_offenders = (
         db.query(
-            cast(Violation.created_at, Date).label("date"),
-            func.count(Violation.id).label("violations")
+            Worker.fullName,
+            func.count(Violation.id).label('violation_count')
         )
-        .filter(date_filter)
-        .group_by(cast(Violation.created_at, Date))
-        .order_by(cast(Violation.created_at, Date))
+        .join(Violation, Worker.id == Violation.worker_id)
+        .filter(
+            Violation.user_id == user_id,
+            Violation.created_at >= start_date,
+            Violation.created_at <= now
+        )
+        .group_by(Worker.fullName)
+        .order_by(func.count(Violation.id).desc())
+        .limit(5)
         .all()
     )
 
-    performance_data = []
-    for day in daily_stats:
-        # Approximate compliance % = 100 - violations per day * factor
-        compliance = max(0, 100 - day.violations * 5)
-        performance_data.append({
-            "date": day.date.strftime("%b %d"),  # e.g., "Oct 19"
-            "violations": day.violations,
-            "compliance": compliance
-        })
-
-    # --- Average Response Time (in minutes) ---
-    # Response time = difference between frame_ts and created_at (violation detection delay)
-    response_times = (
-        db.query(func.avg(func.extract('epoch', Violation.created_at - Violation.frame_ts)/60))
-        .filter(date_filter, Violation.frame_ts.isnot(None))
-        .scalar()
+    # Get violations per day for performance chart
+    performance_data = (
+        db.query(
+            func.date_trunc('day', Violation.created_at).label('date'),
+            func.count(Violation.id).label('count')
+        )
+        .filter(
+            Violation.user_id == user_id,
+            Violation.created_at >= start_date,
+            Violation.created_at <= now
+        )
+        .group_by(func.date_trunc('day', Violation.created_at))
+        .order_by(func.date_trunc('day', Violation.created_at))
+        .all()
     )
-    
-    avg_response = round(response_times or 0, 2)  # in minutes
 
     return {
-        "performance_over_time": performance_data,
-        "average_response_time": avg_response
+        "topOffenders": [
+            {"name": offender[0], "violations": offender[1]} 
+            for offender in top_offenders
+        ],
+        "performanceData": [
+            {
+                "date": entry[0].strftime("%Y-%m-%d"),
+                "count": entry[1]
+            }
+            for entry in performance_data
+        ]
     }
-
-
 
 @router.get("/export")
 def export_reports(

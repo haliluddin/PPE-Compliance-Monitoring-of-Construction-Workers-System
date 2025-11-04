@@ -185,6 +185,16 @@ export default function WorkersProfile() {
     doc.save(fileName);
   };
 
+  // Update the camera display logic
+  const getCameraDisplay = (violation) => {
+    if (!violation.camera_id) {
+      return "Video Upload (Video Upload)";
+    }
+    const camera = violation.camera || "Unknown";
+    const location = violation.camera_location || "N/A";
+    return `${camera} (${location})`;
+  };
+
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
       <button
@@ -390,7 +400,7 @@ export default function WorkersProfile() {
                   <tr key={index} className="grid grid-cols-5 gap-12 bg-[#2A2B30] rounded-lg shadow-sm border border-gray-700 p-4 hover:bg-[#3A3B40] transition-colors items-center">
                     <td className="text-gray-300">{new Date(violation.date || violation.created_at).toLocaleString()}</td>
                     <td className="text-gray-300">{violation.type || violation.violation || violation.violation_type || violation.violation_types || 'N/A'}</td>
-                    <td className="text-gray-300">{violation.cameraLocation || violation.camera_location || violation.camera || violation.camera_name || 'Unknown - N/A'}</td>
+                    <td className="text-gray-300">{getCameraDisplay(violation)}</td>
                     <td>
                       <span className={`px-3 py-1 text-xs font-medium rounded-full border ${ (violation.status || '').toLowerCase() === "resolved" ? "bg-green-500/20 text-green-400 border-green-600/50" : (violation.status || '').toLowerCase() === "pending" ? "bg-red-500/20 text-red-400 border-red-600/50" : (violation.status || '').toLowerCase() === "false positive" ? "bg-yellow-500/20 text-yellow-300 border-yellow-600/50" : "bg-blue-900/30 text-blue-300 border-gray-700" }`}>
                         {violation.status || "Pending"}

@@ -5,21 +5,23 @@ import { FiX, FiUser, FiCamera, FiAlertTriangle, FiClock } from "react-icons/fi"
 export default function ViolationModal({ violation, onClose, onStatusChange }) {
   const [updating, setUpdating] = useState(false);
 
-  const handleStatusChange = async (e) => {
-    const newStatus = e.target.value;
-    setUpdating(true);
+  const handleStatusChange = async (newStatus) => {
     try {
-      await onStatusChange(newStatus);
-    } finally {
+      setUpdating(true);
+      await API.put(`/violations/${violation.id}/status`, { status: newStatus });
+      onStatusChange(newStatus);
+      setUpdating(false);
+    } catch (error) {
+      console.error("Failed to update status:", error);
       setUpdating(false);
     }
   };
 
   if (!violation) return null;
 
-  const snapshotVal = violation.snapshot || violation.snapshot_base64 || violation.snapshot_b64 || null;
-  const snapshotUrl = snapshotVal
-    ? (typeof snapshotVal === "string" && snapshotVal.startsWith("/")) ? snapshotVal : `data:image/jpeg;base64,${snapshotVal}`
+  const snapshotVal = violation.snapshot || violation.snapshot_base64 || violation.snapshot_b64;
+  const snapshotUrl = snapshotVal 
+    ? (snapshotVal.startsWith('data:image') ? snapshotVal : `data:image/jpeg;base64,${snapshotVal}`)
     : "https://via.placeholder.com/400x250?text=No+Snapshot+Available";
 
   const getWorkerName = (v) => {
@@ -46,6 +48,25 @@ export default function ViolationModal({ violation, onClose, onStatusChange }) {
   const getViolationType = (v) => {
     return v.violation || v.violation_type || v.violation_types || v.type || "N/A";
   };
+
+  const formatPhTime = (dateStr) => {
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleString('en-PH', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true
+      });
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
+  dateStr = formatPhTime(violation.created_at);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
