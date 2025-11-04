@@ -1,21 +1,32 @@
 // frontend/src/components/ViolationModal.jsx
 import React, { useState } from "react";
 import { FiX, FiUser, FiCamera, FiAlertTriangle, FiClock } from "react-icons/fi";
+import API from "../api";
 
 export default function ViolationModal({ violation, onClose, onStatusChange }) {
   const [updating, setUpdating] = useState(false);
 
-  const handleStatusChange = async (newStatus) => {
-    try {
-      setUpdating(true);
-      await API.put(`/violations/${violation.id}/status`, { status: newStatus });
-      onStatusChange(newStatus);
-      setUpdating(false);
-    } catch (error) {
-      console.error("Failed to update status:", error);
-      setUpdating(false);
+const handleStatusChange = async (event) => {
+  const newStatus = event.target.value;
+  setUpdating(true);
+  
+  try {
+    const response = await API.put(`/violations/${violation.violation_id}/status`, {
+      status: newStatus.toLowerCase()
+    });
+
+    if (response.status === 200) {
+      if (onStatusChange) {
+        onStatusChange(violation.violation_id, newStatus);
+      }
     }
-  };
+  } catch (error) {
+    console.error("Status update failed:", error);
+    event.target.value = violation.status;
+  } finally {
+    setUpdating(false);
+  }
+};
 
   if (!violation) return null;
 

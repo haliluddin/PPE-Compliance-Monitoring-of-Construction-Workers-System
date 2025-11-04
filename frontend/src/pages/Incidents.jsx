@@ -143,6 +143,7 @@ export default function Incident() {
     } else workerStr = String(workerField);
     return {
       id: n.violation_id || n.id,
+      violation_id: n.violation_id || n.id, // ensure both fields present
       worker: workerStr,
       worker_code: n.worker_code,
       violation: n.violation,

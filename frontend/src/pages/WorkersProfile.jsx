@@ -90,6 +90,7 @@ export default function WorkersProfile() {
   const openViolationModal = (violation) => {
     const norm = {
       id: violation.id || violation.violation_id,
+      violation_id: violation.violation_id || violation.id, // ensure both fields present
       worker: workerData.fullName || workerData.name,
       worker_code: workerData.worker_code || workerData.workerCode,
       violation: violation.type || violation.violation || violation.violation_types || violation.violation_type,

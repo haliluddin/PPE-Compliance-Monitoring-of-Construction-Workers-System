@@ -233,6 +233,7 @@ export default function Notifications() {
     } else workerStr = String(workerField);
     return {
       id: n.violation_id || n.id,
+      violation_id: n.violation_id || n.id, 
       notificationId: n.id,
       worker: workerStr,
       worker_code: n.worker_code,
