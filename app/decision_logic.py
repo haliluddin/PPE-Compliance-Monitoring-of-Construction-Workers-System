@@ -19,6 +19,11 @@ PPE_CLASS_IDS = [0, 1, 2, 3]
 VIS_THRESH = 0.3
 CROP_PAD = 0.12
 
+IMPROPER_GLOVE_OVERLAP_THRESH = 0.45
+IMPROPER_HELMET_HEAD_IOU_THRESH = 0.40
+HELMET_EYE_COVER_MARGIN = 5
+HELMET_NOSE_DOWN_FACTOR = 0.30
+
 _mp_lock = Lock()
 _mp_pose = None
 _pose_instance = None
@@ -137,10 +142,27 @@ def abs_lm(landmarks, idx, xoff, yoff, cw, ch):
     lm = landmarks.landmark[idx]
     return (xoff + lm.x * cw, yoff + lm.y * ch, getattr(lm, "visibility", 0.0))
 
+def _area(box):
+    x1, y1, x2, y2 = box
+    w = max(0.0, x2 - x1); h = max(0.0, y2 - y1)
+    return w * h
+
+def _intersection_area(A, B):
+    xA = max(A[0], B[0]); yA = max(A[1], B[1]); xB = min(A[2], B[2]); yB = min(A[3], B[3])
+    w = max(0.0, xB - xA); h = max(0.0, yB - yA)
+    return w * h
+
 def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
     mp_pose = _init_mp_pose()
     LM = mp_pose.PoseLandmark if mp_pose is not None else None
-    flags = {"helmet": False, "vest": False, "left_glove": False, "right_glove": False, "left_shoe": False, "right_shoe": False}
+    flags = {
+        "helmet": False, "vest": False,
+        "left_glove": False, "right_glove": False,
+        "left_shoe": False, "right_shoe": False,
+        "improper_helmet": False,
+        "improper_left_glove": False,
+        "improper_right_glove": False
+    }
     head_pts = []
     if LM is not None:
         candidates = [LM.NOSE.value, LM.LEFT_EYE.value, LM.RIGHT_EYE.value, LM.LEFT_EAR.value, LM.RIGHT_EAR.value]
@@ -170,27 +192,61 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
             rsx, rsy, rsv = abs_lm(landmarks, LM.RIGHT_SHOULDER.value, xoff, yoff, cw, ch)
             lhx, lhy, lhv = abs_lm(landmarks, LM.LEFT_HIP.value, xoff, yoff, cw, ch)
             rhx, rhy, rhv = abs_lm(landmarks, LM.RIGHT_HIP.value, xoff, yoff, cw, ch)
+            try:
+                nose_x, nose_y, nose_v = abs_lm(landmarks, LM.NOSE.value, xoff, yoff, cw, ch)
+            except Exception:
+                nose_x = nose_y = nose_v = None
+            try:
+                leye_x, leye_y, leye_v = abs_lm(landmarks, LM.LEFT_EYE.value, xoff, yoff, cw, ch)
+            except Exception:
+                leye_x = leye_y = leye_v = None
+            try:
+                reye_x, reye_y, reye_v = abs_lm(landmarks, LM.RIGHT_EYE.value, xoff, yoff, cw, ch)
+            except Exception:
+                reye_x = reye_y = reye_v = None
+            try:
+                lear_x, lear_y, lear_v = abs_lm(landmarks, LM.LEFT_EAR.value, xoff, yoff, cw, ch)
+            except Exception:
+                lear_x = lear_y = lear_v = None
+            try:
+                rear_x, rear_y, rear_v = abs_lm(landmarks, LM.RIGHT_EAR.value, xoff, yoff, cw, ch)
+            except Exception:
+                rear_x = rear_y = rear_v = None
         else:
             lsx = rsx = lhx = rhx = lsy = rsy = lhy = rhy = None
             lsv = rsv = lhv = rhv = 0.0
+            nose_x = nose_y = nose_v = None
+            leye_x = leye_y = leye_v = None
+            reye_x = reye_y = reye_v = None
+            lear_x = lear_y = lear_v = None
+            rear_x = rear_y = rear_v = None
     except Exception:
         lsx = rsx = lhx = rhx = lsy = rsy = lhy = rhy = None; lsv = rsv = lhv = rhv = 0.0
+        nose_x = nose_y = nose_v = None
+        leye_x = leye_y = leye_v = None
+        reye_x = reye_y = reye_v = None
+        lear_x = lear_y = lear_v = None
+        rear_x = rear_y = rear_v = None
     glove_boxes = boxes_by_class.get(0, [])
     helmet_boxes = boxes_by_class.get(1, [])
     shoe_boxes = boxes_by_class.get(2, [])
     vest_boxes = boxes_by_class.get(3, [])
     wrist_radius = max(16, int((person_bbox[2] - person_bbox[0]) * 0.04))
+    matched_left_glove_box = None
+    matched_right_glove_box = None
     if lwv >= VIS_THRESH:
         wb = (lwx - wrist_radius, lwy - wrist_radius, lwx + wrist_radius, lwy + wrist_radius)
         for bx in glove_boxes:
             if iou(wb, (bx[0], bx[1], bx[2], bx[3])) > 0.02:
                 flags["left_glove"] = True
+                matched_left_glove_box = (bx[0], bx[1], bx[2], bx[3])
                 break
     if rwv >= VIS_THRESH:
         wb = (rwx - wrist_radius, rwy - wrist_radius, rwx + wrist_radius, rwy + wrist_radius)
         for bx in glove_boxes:
             if iou(wb, (bx[0], bx[1], bx[2], bx[3])) > 0.02:
                 flags["right_glove"] = True
+                matched_right_glove_box = (bx[0], bx[1], bx[2], bx[3])
                 break
     ankle_radius = max(20, int((person_bbox[3] - person_bbox[1]) * 0.05))
     if lav >= 0.05:
@@ -207,9 +263,11 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
                 break
     head_w = max(20, (person_bbox[2] - person_bbox[0]) * 0.25); head_h = max(20, (person_bbox[3] - person_bbox[1]) * 0.18)
     head_box = (hx - head_w, hy - head_h, hx + head_w, hy + head_h)
+    matched_helmet_box = None
     for bx in helmet_boxes:
         if iou(head_box, (bx[0], bx[1], bx[2], bx[3])) > 0.05:
             flags["helmet"] = True
+            matched_helmet_box = (bx[0], bx[1], bx[2], bx[3])
             break
     if lsx is not None:
         xs = [p for p in [lsx, rsx, lhx, rhx] if p is not None]
@@ -230,6 +288,69 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
             if iou(cb, (bx[0], bx[1], bx[2], bx[3])) > 0.05:
                 flags["vest"] = True
                 break
+    def _make_wrist_region(wx, wy, ex=None, ey=None):
+        if ex is not None and ey is not None:
+            x1 = min(wx, ex) - int(wrist_radius * 1.0)
+            x2 = max(wx, ex) + int(wrist_radius * 1.0)
+            y1 = min(wy, ey) - int(wrist_radius * 1.0)
+            y2 = max(wy, ey) + int(wrist_radius * 1.0)
+        else:
+            x1 = wx - wrist_radius * 2
+            x2 = wx + wrist_radius * 2
+            y1 = wy - wrist_radius * 2
+            y2 = wy + wrist_radius * 2
+        return (x1, y1, x2, y2)
+    if matched_left_glove_box is not None and LM is not None:
+        try:
+            lex, ley, lev = abs_lm(landmarks, LM.LEFT_ELBOW.value, xoff, yoff, cw, ch)
+            expected = _make_wrist_region(lwx, lwy, lex if lev >= VIS_THRESH else None, ley if lev >= VIS_THRESH else None)
+        except Exception:
+            expected = _make_wrist_region(lwx, lwy)
+        glue_area = _area(matched_left_glove_box)
+        if glue_area > 0:
+            inter = _intersection_area(matched_left_glove_box, expected)
+            frac = inter / glue_area
+            if frac < IMPROPER_GLOVE_OVERLAP_THRESH:
+                flags["improper_left_glove"] = True
+    if matched_right_glove_box is not None and LM is not None:
+        try:
+            rex, rey, rev = abs_lm(landmarks, LM.RIGHT_ELBOW.value, xoff, yoff, cw, ch)
+            expected = _make_wrist_region(rwx, rwy, rex if rev >= VIS_THRESH else None, rey if rev >= VIS_THRESH else None)
+        except Exception:
+            expected = _make_wrist_region(rwx, rwy)
+        glue_area = _area(matched_right_glove_box)
+        if glue_area > 0:
+            inter = _intersection_area(matched_right_glove_box, expected)
+            frac = inter / glue_area
+            if frac < IMPROPER_GLOVE_OVERLAP_THRESH:
+                flags["improper_right_glove"] = True
+    if matched_helmet_box is not None:
+        hb = matched_helmet_box
+        helmet_area = _area(hb)
+        if helmet_area > 0:
+            head_inter = _intersection_area(hb, head_box)
+            head_overlap_frac = head_inter / helmet_area
+            if head_overlap_frac < IMPROPER_HELMET_HEAD_IOU_THRESH:
+                flags["improper_helmet"] = True
+        eye_y = None
+        leye_v = locals().get("leye_v", None)
+        reye_v = locals().get("reye_v", None)
+        leye_y = locals().get("leye_y", None)
+        reye_y = locals().get("reye_y", None)
+        nose_v = locals().get("nose_v", None)
+        nose_y = locals().get("nose_y", None)
+        if leye_v is not None and leye_v >= VIS_THRESH and reye_v is not None and reye_v >= VIS_THRESH:
+            eye_y = min(leye_y, reye_y)
+        elif leye_v is not None and leye_v >= VIS_THRESH:
+            eye_y = leye_y
+        elif reye_v is not None and reye_v >= VIS_THRESH:
+            eye_y = reye_y
+        if eye_y is not None:
+            if hb[1] <= eye_y + HELMET_EYE_COVER_MARGIN:
+                flags["improper_helmet"] = True
+        if nose_v is not None and nose_v >= VIS_THRESH:
+            if hb[3] > nose_y + (head_h * HELMET_NOSE_DOWN_FACTOR):
+                flags["improper_helmet"] = True
     return flags
 
 def draw_pose(frame, landmarks, xoff, yoff, cw, ch):
@@ -333,17 +454,26 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         if res_pose and getattr(res_pose, "pose_landmarks", None):
             draw_pose(annotated, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
             flags = check_ppe(boxes_by_class, person_bbox, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
-            if not flags["helmet"]:
+            if not flags.get("helmet", False):
                 violations.append("NO HELMET")
-            if not flags["vest"]:
+            else:
+                if flags.get("improper_helmet"):
+                    violations.append("IMPROPER HELMET")
+            if not flags.get("vest", False):
                 violations.append("NO VEST")
-            if not flags["left_glove"]:
+            if not flags.get("left_glove", False):
                 violations.append("NO LEFT GLOVE")
-            if not flags["right_glove"]:
+            else:
+                if flags.get("improper_left_glove"):
+                    violations.append("IMPROPER LEFT GLOVE")
+            if not flags.get("right_glove", False):
                 violations.append("NO RIGHT GLOVE")
-            if not flags["left_shoe"]:
+            else:
+                if flags.get("improper_right_glove"):
+                    violations.append("IMPROPER RIGHT GLOVE")
+            if not flags.get("left_shoe", False):
                 violations.append("NO LEFT SHOE")
-            if not flags["right_shoe"]:
+            if not flags.get("right_shoe", False):
                 violations.append("NO RIGHT SHOE")
             if ocr_reader is not None:
                 mp_pose = _init_mp_pose()
