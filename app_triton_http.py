@@ -94,6 +94,8 @@ STREAM_THREADS = {}
 STREAM_EVENTS = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
+SYS_FRAME_RESULTS = {}
+SYS_RESULTS_LOCK = threading.Lock()
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -112,6 +114,48 @@ def load_model_metadata(client, model_name):
         return {'input_name': input_name, 'output_names': output_names}
     except Exception:
         return {'input_name': None, 'output_names': []}
+def store_frame_result(payload):
+    try:
+        meta = payload.get("meta", {}) or {}
+        job_id = meta.get("job_id", "no_job")
+        frame_idx = meta.get("frame_idx")
+        if frame_idx is not None:
+            image_id = f"{job_id}_{frame_idx}"
+        else:
+            image_id = f"{job_id}_{int(time.time()*1000)}"
+        people_in = payload.get("people", []) or []
+        people = []
+        for p in people_in:
+            people.append({
+                "bbox": p.get("bbox"),
+                "id": p.get("id"),
+                "violations": p.get("violations", [])
+            })
+        frame_obj = {"image_id": image_id, "people": people}
+        key = str(job_id)
+        with SYS_RESULTS_LOCK:
+            lst = SYS_FRAME_RESULTS.get(key)
+            if lst is None:
+                lst = []
+                SYS_FRAME_RESULTS[key] = lst
+            lst.append(frame_obj)
+            try:
+                path = os.path.join(tmp_upload_dir, f"sys_frame_results_job_{key}.json")
+                with open(path, "w") as f:
+                    json.dump(lst, f)
+            except Exception:
+                pass
+            try:
+                combined = []
+                for v in SYS_FRAME_RESULTS.values():
+                    combined.extend(v)
+                allpath = os.path.join(tmp_upload_dir, "sys_frame_results.json")
+                with open(allpath, "w") as f:
+                    json.dump(combined, f)
+            except Exception:
+                pass
+    except Exception:
+        pass
 @app.on_event("startup")
 def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
@@ -256,6 +300,10 @@ async def redis_subscriber_task():
                         payload = json.loads(data)
                 except Exception:
                     payload = {"raw": str(data)}
+                try:
+                    store_frame_result(payload)
+                except Exception:
+                    pass
                 coros = []
                 for ws in list(ws_clients):
                     try:
@@ -316,7 +364,13 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                             pass
                 else:
                     try:
-                        process_image(img_bytes, meta)
+                        res = process_image(img_bytes, meta)
+                        try:
+                            payload = {"meta": meta, "people": [], "boxes_by_class": {}}
+                            if isinstance(res, dict):
+                                pass
+                        except Exception:
+                            pass
                     except Exception:
                         try:
                             process_image_task.delay(img_b64, meta)
@@ -879,3 +933,15 @@ def reports_export(period: str = "today"):
         return Response(content=output, media_type="text/csv", headers=headers)
     finally:
         sess.close()
+@app.get("/sys_frames/{job_id}")
+def get_sys_frames(job_id: str):
+    key = str(job_id)
+    with SYS_RESULTS_LOCK:
+        return SYS_FRAME_RESULTS.get(key, [])
+@app.get("/sys_frames")
+def get_all_sys_frames():
+    with SYS_RESULTS_LOCK:
+        combined = []
+        for v in SYS_FRAME_RESULTS.values():
+            combined.extend(v)
+        return combined
