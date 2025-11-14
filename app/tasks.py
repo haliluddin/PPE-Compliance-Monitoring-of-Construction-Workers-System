@@ -386,6 +386,11 @@ def _process_image(image_bytes, meta=None):
             worker_id = None
             worker_obj = None
             display_name = None
+
+            # read OCR fields that decision_logic now populates
+            ocr_txt = p.get("ocr_text")
+            matched_id_raw = p.get("matched_id_raw") or p.get("id")
+
             if id_label is not None and id_label != "UNID":
                 if isinstance(id_label, dict):
                     worker_code = id_label.get("worker_code") or id_label.get("worker") or id_label.get("code") or None
@@ -408,48 +413,19 @@ def _process_image(image_bytes, meta=None):
                             display_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
                         except Exception:
                             display_name = None
+
             if violations and worker_obj is not None:
-                snap_bytes = None
-                try:
-                    if annotated is not None:
-                        bbox = p.get("bbox")
-                        if bbox and len(bbox) == 4:
-                            x1, y1, x2, y2 = map(int, bbox)
-                            x1 = max(0, x1); y1 = max(0, y1); x2 = min(frame.shape[1] - 1, x2); y2 = min(frame.shape[0] - 1, y2)
-                            crop = annotated[y1:y2, x1:x2]
-                            if crop is None or crop.size == 0:
-                                _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                snap_bytes = jpg.tobytes()
-                            else:
-                                _, jpg = cv2.imencode('.jpg', crop, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                snap_bytes = jpg.tobytes()
-                        else:
-                            _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                            snap_bytes = jpg.tobytes()
-                except Exception:
-                    try:
-                        _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                        snap_bytes = jpg.tobytes()
-                    except Exception:
-                        snap_bytes = None
-                inference_json = {"person": p, "boxes_by_class": result.get("boxes_by_class", {})}
-                should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
-                if should_save_violation:
-                    try:
-                        vtypes = ", ".join([str(x).replace("_", " ").title() for x in violations]) if violations else ""
-                        v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=vtypes, frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
-                        if worker_obj is not None:
-                            try:
-                                v.worker = worker_obj
-                            except Exception:
-                                pass
-                        sess.add(v)
-                        sess.commit()
-                        sess.refresh(v)
-                    except Exception:
-                        sess.rollback()
+                # (keep your existing snapshot/save Violation logic unchanged)
+                [...]
             id_for_publish = display_name if display_name else (worker_code if worker_code else (str(id_label) if id_label is not None else None))
-            publish_people.append({"bbox": p.get("bbox"), "id": id_for_publish, "violations": violations})
+            publish_people.append({
+                "bbox": p.get("bbox"),
+                "id": id_for_publish,
+                "violations": violations,
+                "ocr_text": ocr_txt,
+                "matched_id_raw": matched_id_raw
+            })
+
         annotated_b64 = None
         if annotated is not None:
             try:
