@@ -8,8 +8,20 @@ from app.schemas import ViolationCreate, ViolationResponse
 from app.router.notifications_ws import connected_clients, broadcast_notification
 import json
 import asyncio
+from datetime import datetime, timezone
+import base64
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
+
+
+def _format_camera_display(camera_name, camera_location):
+    if not camera_name and not camera_location:
+        return "Video Upload (Video Upload)"
+    if camera_name and camera_location:
+        return f"{camera_name} ({camera_location})"
+    if camera_name:
+        return f"{camera_name} ({camera_name})" if camera_name.lower().startswith("video upload") else camera_name
+    return f"{camera_location} ({camera_location})"
 
 
 @router.get("/")
@@ -25,24 +37,36 @@ def get_violations(db: Session = Depends(get_db), current_user: User = Depends(g
             Camera.location.label("camera_location")
         )
         .join(Worker, Violation.worker_id == Worker.id)
-        .join(Camera, Violation.camera_id == Camera.id)
+        .outerjoin(Camera, Violation.camera_id == Camera.id)
         .filter(Violation.user_id == current_user.id)
         .all()
     )
 
-    return [
-        {
+    out = []
+    for v in violations:
+        snap_b64 = None
+        if v.Violation.snapshot:
+            try:
+                snap_b64 = base64.b64encode(v.Violation.snapshot).decode("ascii")
+            except Exception:
+                snap_b64 = None
+
+        camera_display = _format_camera_display(v.camera_name, v.camera_location)
+        created_at_iso = None
+        if getattr(v.Violation, "created_at", None):
+            created_at_iso = v.Violation.created_at.isoformat()
+
+        out.append({
             "id": v.Violation.id,
             "violation": v.Violation.violation_types,
             "worker": v.fullName,
             "worker_code": v.Violation.worker_code,
-            "camera": v.camera_name or v.camera_location,
-            "created_at": v.Violation.created_at,
+            "camera": camera_display,
+            "created_at": created_at_iso,
             "status": v.Violation.status,
-            "snapshot": v.Violation.snapshot.decode("utf-8") if v.Violation.snapshot else None,
-        }
-        for v in violations
-    ]
+            "snapshot": snap_b64,
+        })
+    return out
 
 
 @router.post("/")
@@ -54,11 +78,27 @@ def create_violation(
     """
     Create a new violation and broadcast a notification to connected WebSocket clients.
     """
-    # Create violation
+    # Parse frame_ts safely into datetime (if provided)
+    frame_ts_val = None
+    if violation.frame_ts:
+        try:
+            # accept ISO format or unix timestamp string/int
+            try:
+                frame_ts_val = datetime.fromisoformat(str(violation.frame_ts))
+            except Exception:
+                try:
+                    # try as unix seconds
+                    ts = float(violation.frame_ts)
+                    frame_ts_val = datetime.fromtimestamp(ts, tz=timezone.utc)
+                except Exception:
+                    frame_ts_val = None
+        except Exception:
+            frame_ts_val = None
+
     new_violation = Violation(
         violation_types=violation.violation_types,
         worker_id=violation.worker_id,
-        frame_ts=violation.frame_ts,
+        frame_ts=frame_ts_val,
         worker_code=violation.worker_code,
         camera_id=violation.camera_id,
         user_id=current_user.id,
@@ -68,13 +108,14 @@ def create_violation(
     db.commit()
     db.refresh(new_violation)
 
-    # Create notification in DB
+    # Create notification in DB (set created_at explicitly so it's full datetime)
     message = f"New violation detected: {new_violation.violation_types} by worker code {new_violation.worker_code}"
     new_notification = Notification(
         message=message,
         user_id=current_user.id,
         violation_id=new_violation.id,
         is_read=False,
+        created_at=datetime.utcnow()
     )
     db.add(new_notification)
     db.commit()
@@ -87,19 +128,19 @@ def create_violation(
     notification_data = {
          "type": "new_violation",
         "id": new_notification.id,
-        "violation_id": new_violation.id, 
+        "violation_id": new_violation.id,
         "message": message,
         "is_read": new_notification.is_read,
-        "created_at": str(new_notification.created_at),
+        "created_at": new_notification.created_at.isoformat(),
         "violation_type": new_violation.violation_types,
         "worker_code": new_violation.worker_code,
         "worker_name": worker.fullName if worker else "Unknown Worker",
-        "camera": camera.name if camera else "Unknown Camera",
-        "camera_location": camera.location if camera else "Unknown Location",
-         "status": new_violation.status,   # include status for real-time updates,
+        "camera": camera.name if camera else None,
+        "camera_location": camera.location if camera else None,
+         "status": new_violation.status,
     }
 
-    # Broadcast via WebSocket
+    # Broadcast via WebSocket (unchanged)
     try:
         loop = asyncio.get_event_loop()
         loop.create_task(broadcast_notification(current_user.id, notification_data))

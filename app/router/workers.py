@@ -8,6 +8,8 @@ from app.schemas import WorkerResponse, WorkerCreate
 from app.router.auth import get_current_user
 from typing import List
 from fastapi import HTTPException
+import base64
+from datetime import datetime
 
 router = APIRouter()
 
@@ -88,6 +90,15 @@ def add_worker(
 # -----------------------------
 # GET single worker with violations
 # -----------------------------
+def _format_camera_display(camera_name, camera_location):
+    if not camera_name and not camera_location:
+        return "Video Upload (Video Upload)"
+    if camera_name and camera_location:
+        return f"{camera_name} ({camera_location})"
+    if camera_name:
+        return camera_name
+    return camera_location
+
 @router.get("/workers/{worker_id}")
 def get_worker_profile(
     worker_id: int,
@@ -103,40 +114,45 @@ def get_worker_profile(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
- 
     violations = (
         db.query(
             Violation.id,
             Violation.created_at,
             Violation.violation_types,
-             Violation.status,
+            Violation.status,
             Camera.name.label("camera_name"),
-            Camera.location.label("camera_location")
+            Camera.location.label("camera_location"),
+            Violation.snapshot
         )
-        .join(Camera, Violation.camera_id == Camera.id, isouter=True)
+        .outerjoin(Camera, Violation.camera_id == Camera.id)
         .filter(Violation.worker_id == worker.id)
         .all()
     )
 
-    
-    violation_history = [
-        {
+    violation_history = []
+    for v in violations:
+        snap_b64 = None
+        if v.snapshot:
+            try:
+                snap_b64 = base64.b64encode(v.snapshot).decode("ascii")
+            except Exception:
+                snap_b64 = None
+        camera_display = _format_camera_display(v.camera_name, v.camera_location)
+        created_iso = v.created_at.isoformat() if v.created_at else None
+        violation_history.append({
             "id": v.id,
-            "date": v.created_at, 
+            "date": created_iso,
             "type": v.violation_types,
-             "status": v.status,
-            "cameraLocation": f"{v.camera_name or 'Unknown'} - {v.camera_location or 'N/A'}",
-             "worker_name": worker.fullName,
-        }
-        for v in violations
-    ]
+            "status": v.status,
+            "cameraLocation": camera_display,
+            "worker_name": worker.fullName,
+            "snapshot": snap_b64
+        })
 
     return {
         "id": worker.id,
         "fullName": worker.fullName,
         "worker_code": worker.worker_code,
-        # "assignedLocation": worker.assignedLocation,
-        # "role": worker.role,
         "dateAdded": worker.dateAdded,
         "status": worker.status,
         "registered": worker.registered,

@@ -4,6 +4,17 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Notification, Violation, Worker, Camera, User
 from app.router.auth import get_current_user
+import base64
+from datetime import datetime
+
+def _format_camera_display(camera_name, camera_location):
+    if not camera_name and not camera_location:
+        return "Video Upload (Video Upload)"
+    if camera_name and camera_location:
+        return f"{camera_name} ({camera_location})"
+    if camera_name:
+        return camera_name
+    return camera_location
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -26,26 +37,39 @@ def get_notifications(
         .outerjoin(Camera, Violation.camera_id == Camera.id)
         .filter(Notification.user_id == current_user.id)
         .order_by(Notification.created_at.desc())
-        .limit(10) 
+        .limit(50) 
         .all()
     )
 
-    return [
-        {
+    out = []
+    for n in notifications:
+        snap_b64 = None
+        vobj = n.Violation
+        if vobj and getattr(vobj, "snapshot", None):
+            try:
+                snap_b64 = base64.b64encode(vobj.snapshot).decode("ascii")
+            except Exception:
+                snap_b64 = None
+
+        camera_display = _format_camera_display(getattr(n, "camera_name", None), getattr(n, "camera_location", None))
+        created_iso = n.Notification.created_at.isoformat() if n.Notification.created_at else None
+
+        out.append({
             "id": n.Notification.id,
-            "violation_id": n.Violation.id if n.Violation else None, 
+            "violation_id": vobj.id if vobj else None,
             "message": n.Notification.message,
             "is_read": n.Notification.is_read,
-            "created_at": n.Notification.created_at,
-            "worker_code": getattr(n.Violation, "worker_code", None),
+            "created_at": created_iso,
+            "worker_code": getattr(vobj, "worker_code", None) if vobj else None,
             "worker_name": getattr(n.Worker, "fullName", "Unknown Worker"),
-            "violation_type": getattr(n.Violation, "violation_types", "Unknown Violation"),
-            "camera": getattr(n, "camera_name", None) or "Unknown Camera",
-            "camera_location": getattr(n, "camera_location", None) or "Unknown Location",
-             "status": getattr(n.Violation, "status", "Pending"),
-        }
-        for n in notifications
-    ]
+            "violation_type": getattr(vobj, "violation_types", "Unknown Violation"),
+            "camera": camera_display,
+            "camera_name": getattr(n, "camera_name", None),
+            "camera_location": getattr(n, "camera_location", None),
+            "status": getattr(vobj, "status", "Pending"),
+            "snapshot": snap_b64,
+        })
+    return out
 
 
 @router.post("/{notification_id}/mark_read")

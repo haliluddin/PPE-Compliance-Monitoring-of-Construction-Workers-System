@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import logging
 from sqlalchemy import or_
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Lock
 
 from urllib.parse import urlparse
@@ -412,40 +412,47 @@ def _process_image(image_bytes, meta=None):
                 snap_bytes = None
                 try:
                     if annotated is not None:
-                        bbox = p.get("bbox")
-                        if bbox and len(bbox) == 4:
-                            x1, y1, x2, y2 = map(int, bbox)
-                            x1 = max(0, x1); y1 = max(0, y1); x2 = min(frame.shape[1] - 1, x2); y2 = min(frame.shape[0] - 1, y2)
-                            crop = annotated[y1:y2, x1:x2]
-                            if crop is None or crop.size == 0:
-                                _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                snap_bytes = jpg.tobytes()
-                            else:
-                                _, jpg = cv2.imencode('.jpg', crop, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                                snap_bytes = jpg.tobytes()
-                        else:
-                            _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                            snap_bytes = jpg.tobytes()
-                except Exception:
-                    try:
-                        _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                        # encode annotated to jpg bytes for snapshot
+                        _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                         snap_bytes = jpg.tobytes()
-                    except Exception:
-                        snap_bytes = None
+                except Exception:
+                    snap_bytes = None
+
                 inference_json = {"person": p, "boxes_by_class": result.get("boxes_by_class", {})}
                 should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
                 if should_save_violation:
                     try:
-                        vtypes = ", ".join([str(x).replace("_", " ").title() for x in violations]) if violations else ""
-                        v = Violation(job_id=job_id, camera_id=camera_id, worker_id=worker_id, worker_code=worker_code, violation_types=vtypes, frame_index=frame_idx, frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None, snapshot=snap_bytes, inference=inference_json, created_at=datetime.utcnow())
-                        if worker_obj is not None:
-                            try:
-                                v.worker = worker_obj
-                            except Exception:
-                                pass
-                        sess.add(v)
+                        # Create Violation record
+                        vio = Violation(
+                            job_id=job_id,
+                            camera_id=camera_id,
+                            worker_id=worker_obj.id,
+                            worker_code=worker_code,
+                            violation_types=",".join(violations) if isinstance(violations, (list,tuple)) else str(violations),
+                            frame_index=frame_idx,
+                            frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None,
+                            snapshot=snap_bytes,
+                            inference=inference_json,
+                            status="pending",
+                            user_id=job.user_id if job is not None else current_user.id if 'current_user' in globals() else None
+                        )
+                        sess.add(vio)
                         sess.commit()
-                        sess.refresh(v)
+                        sess.refresh(vio)
+
+                        # Create Notification record so it persists
+                        try:
+                            notif = Notification(
+                                message=f"New violation: {vio.violation_types} ({vio.worker_code})",
+                                is_read=False,
+                                created_at=datetime.utcnow(),
+                                user_id=vio.user_id,
+                                violation_id=vio.id
+                            )
+                            sess.add(notif)
+                            sess.commit()
+                        except Exception:
+                            sess.rollback()
                     except Exception:
                         sess.rollback()
             id_for_publish = display_name if display_name else (worker_code if worker_code else (str(id_label) if id_label is not None else None))
