@@ -451,6 +451,7 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         person_bbox = (x1i, y1i, x2i, y2i)
         violations = []
         matched_id = None
+        matched_id_conf = 0.0
         if res_pose and getattr(res_pose, "pose_landmarks", None):
             draw_pose(annotated, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
             flags = check_ppe(boxes_by_class, person_bbox, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
@@ -506,6 +507,10 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                     mid, txt, conf = detect_torso(ocr_reader, torso, regset or set())
                     if mid is not None:
                         matched_id = mid
+                        try:
+                            matched_id_conf = float(conf) if conf is not None else 0.0
+                        except Exception:
+                            matched_id_conf = 0.0
         else:
             vest_boxes = boxes_by_class.get(3, [])
             helmet_boxes = boxes_by_class.get(1, [])
@@ -519,6 +524,10 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                     mid, txt, conf = detect_torso(ocr_reader, pc, regset or set())
                     if mid is not None:
                         matched_id = mid
+                        try:
+                            matched_id_conf = float(conf) if conf is not None else 0.0
+                        except Exception:
+                            matched_id_conf = 0.0
         if matched_id is not None:
             id_label = matched_id
         else:
@@ -528,7 +537,7 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         ty = y2i + 18
         for v in violations:
             cv2.putText(annotated, v, (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 220), 2, cv2.LINE_AA); ty += 18
-        people_results.append({"bbox": person_bbox, "id": id_label, "violations": violations})
+        people_results.append({"bbox": person_bbox, "id": id_label, "id_conf": matched_id_conf, "violations": violations})
     for cls_id, boxes in boxes_by_class.items():
         if not boxes:
             continue

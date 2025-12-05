@@ -1,4 +1,3 @@
-# app/tasks.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -22,7 +21,7 @@ from urllib.parse import urlparse
 
 from app.decision_logic import process_frame, init_pose
 from app.database import SessionLocal
-from app.models import Violation, Job, Worker
+from app.models import Violation, Job, Worker, Notification
 
 try:
     from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
@@ -38,6 +37,8 @@ try:
     from .celery_app import celery
 except Exception:
     celery = None
+
+from app.tracker import get_global_tracker
 
 log = logging.getLogger(__name__)
 
@@ -380,12 +381,9 @@ def _process_image(image_bytes, meta=None):
         r = get_redis()
         publish_people = []
         for p in people:
-            violations = p.get("violations", [])
             id_label = p.get("id")
-            worker_code = None
-            worker_id = None
-            worker_obj = None
             display_name = None
+            worker_code = None
             if id_label is not None and id_label != "UNID":
                 if isinstance(id_label, dict):
                     worker_code = id_label.get("worker_code") or id_label.get("worker") or id_label.get("code") or None
@@ -396,78 +394,31 @@ def _process_image(image_bytes, meta=None):
                         worker_code = s.split(":", 1)[1]
                     else:
                         worker_code = s
-                try:
-                    if worker_code:
-                        worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
-                except Exception:
-                    worker_obj = None
-                if worker_obj is not None:
-                    worker_id = worker_obj.id
-                    if not display_name:
-                        try:
-                            display_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
-                        except Exception:
-                            display_name = None
-            if violations and worker_obj is not None:
-                snap_bytes = None
-                try:
-                    if annotated is not None:
-                        # encode annotated to jpg bytes for snapshot
-                        _, jpg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                        snap_bytes = jpg.tobytes()
-                except Exception:
-                    snap_bytes = None
-
-                inference_json = {"person": p, "boxes_by_class": result.get("boxes_by_class", {})}
-                should_save_violation = bool(worker_obj and getattr(worker_obj, "registered", True))
-                if should_save_violation:
                     try:
-                        # Create Violation record
-                        vio = Violation(
-                            job_id=job_id,
-                            camera_id=camera_id,
-                            worker_id=worker_obj.id,
-                            worker_code=worker_code,
-                            violation_types=",".join(violations) if isinstance(violations, (list,tuple)) else str(violations),
-                            frame_index=frame_idx,
-                            frame_ts=datetime.utcfromtimestamp(frame_ts) if frame_ts else None,
-                            snapshot=snap_bytes,
-                            inference=inference_json,
-                            status="pending",
-                            user_id=job.user_id if job is not None else current_user.id if 'current_user' in globals() else None
-                        )
-                        sess.add(vio)
-                        sess.commit()
-                        sess.refresh(vio)
-
-                        # Create Notification record so it persists
-                        try:
-                            notif = Notification(
-                                message=f"New violation: {vio.violation_types} ({vio.worker_code})",
-                                is_read=False,
-                                created_at=datetime.utcnow(),
-                                user_id=vio.user_id,
-                                violation_id=vio.id
-                            )
-                            sess.add(notif)
-                            sess.commit()
-                        except Exception:
-                            sess.rollback()
+                        if worker_code:
+                            worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first()
+                            if worker_obj:
+                                display_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
                     except Exception:
-                        sess.rollback()
+                        worker_obj = None
             id_for_publish = display_name if display_name else (worker_code if worker_code else (str(id_label) if id_label is not None else None))
-            publish_people.append({"bbox": p.get("bbox"), "id": id_for_publish, "violations": violations})
+            publish_people.append({"bbox": p.get("bbox"), "id": id_for_publish, "violations": p.get("violations", [])})
         annotated_b64 = None
+        annotated_bytes = None
         if annotated is not None:
             try:
                 should_publish_image = any((p.get("violations") or []) for p in people) or (meta.get("frame_idx", 0) % 10 == 0)
                 if should_publish_image:
                     _, jpgall = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     annotated_b64 = base64.b64encode(jpgall.tobytes()).decode("ascii")
+                    annotated_bytes = jpgall.tobytes()
                 else:
                     annotated_b64 = None
+                    _, jpgall = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                    annotated_bytes = jpgall.tobytes()
             except Exception:
                 annotated_b64 = None
+                annotated_bytes = None
         payload = {"meta": meta, "people": publish_people, "boxes_by_class": result.get("boxes_by_class", {}), "annotated_jpeg_b64": annotated_b64, "timestamp": time.time()}
         if r:
             try:
@@ -490,6 +441,11 @@ def _process_image(image_bytes, meta=None):
                             pass
             except Exception:
                 pass
+        tracker = get_global_tracker()
+        try:
+            tracker.update_tracks(people, frame_idx or 0, datetime.utcfromtimestamp(frame_ts) if frame_ts else datetime.utcnow(), annotated_bytes, sess, job_id=job_id, camera_id=camera_id, job_user_id=job.user_id if job is not None else None)
+        except Exception:
+            sess.rollback()
         return {"status": "ok", "meta": meta, "result_summary": {"people": len(people)}}
     except Exception:
         log.exception("processing image failed")
@@ -511,4 +467,3 @@ else:
 
 def process_image(image_bytes, meta=None):
     return _process_image(image_bytes, meta)
-
