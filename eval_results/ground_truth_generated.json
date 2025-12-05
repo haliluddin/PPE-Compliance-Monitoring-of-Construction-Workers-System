@@ -1,0 +1,429 @@
+{
+  "siteA": {
+    "angles": [
+      "near",
+      "between",
+      "far"
+    ],
+    "workers": {
+      "2": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": []
+      },
+      "751": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE",
+          "NO LEFT SHOE"
+        ]
+      },
+      "81": {
+        "helmet": false,
+        "vest": false,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO VEST",
+          "NO HELMET"
+        ]
+      },
+      "65": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": true,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO RIGHT SHOE",
+          "NO RIGHT GLOVE",
+          "NO LEFT SHOE",
+          "NO VEST"
+        ]
+      },
+      "76": {
+        "helmet": false,
+        "vest": true,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE",
+          "NO HELMET"
+        ]
+      }
+    }
+  },
+  "siteB": {
+    "angles": [
+      "near",
+      "between",
+      "far"
+    ],
+    "workers": {
+      "2": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": []
+      },
+      "751": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE",
+          "NO LEFT SHOE"
+        ]
+      },
+      "81": {
+        "helmet": false,
+        "vest": false,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO VEST",
+          "NO HELMET"
+        ]
+      },
+      "65": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": true,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO RIGHT SHOE",
+          "NO RIGHT GLOVE",
+          "NO LEFT SHOE",
+          "NO VEST"
+        ]
+      },
+      "76": {
+        "helmet": false,
+        "vest": true,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE",
+          "NO HELMET"
+        ]
+      }
+    }
+  },
+  "siteC": {
+    "angles": [
+      "all"
+    ],
+    "workers": {
+      "23": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": []
+      },
+      "6": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO VEST"
+        ]
+      },
+      "3": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE"
+        ]
+      },
+      "698": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO RIGHT SHOE",
+          "NO LEFT SHOE"
+        ]
+      }
+    }
+  },
+  "siteD": {
+    "angles": [
+      "near",
+      "between",
+      "far"
+    ],
+    "workers": {
+      "325": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": []
+      },
+      "23": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE",
+          "NO VEST"
+        ]
+      },
+      "6": {
+        "helmet": false,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO RIGHT SHOE",
+          "NO LEFT SHOE",
+          "NO HELMET"
+        ]
+      },
+      "201": {
+        "helmet": false,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO VEST",
+          "NO LEFT SHOE",
+          "NO HELMET",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE"
+        ]
+      },
+      "3": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "improper_helmet": true,
+        "improper_left_glove": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "IMPROPER HELMET",
+          "NO VEST",
+          "NO LEFT SHOE",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE"
+        ]
+      }
+    }
+  },
+  "siteE": {
+    "angles": [
+      "near",
+      "between",
+      "far"
+    ],
+    "workers": {
+      "325": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": []
+      },
+      "23": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE",
+          "NO VEST"
+        ]
+      },
+      "6": {
+        "helmet": false,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO RIGHT SHOE",
+          "NO LEFT SHOE",
+          "NO HELMET"
+        ]
+      },
+      "201": {
+        "helmet": false,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO VEST",
+          "NO LEFT SHOE",
+          "NO HELMET",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE"
+        ]
+      },
+      "3": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "improper_helmet": true,
+        "improper_left_glove": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "IMPROPER HELMET",
+          "NO VEST",
+          "NO LEFT SHOE",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE"
+        ]
+      }
+    }
+  },
+  "siteF": {
+    "angles": [
+      "near",
+      "between",
+      "far"
+    ],
+    "workers": {
+      "325": {
+        "helmet": true,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": []
+      },
+      "23": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": true,
+        "right_shoe": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO RIGHT GLOVE",
+          "NO VEST"
+        ]
+      },
+      "6": {
+        "helmet": false,
+        "vest": true,
+        "left_glove": true,
+        "right_glove": true,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO RIGHT SHOE",
+          "NO LEFT SHOE",
+          "NO HELMET"
+        ]
+      },
+      "201": {
+        "helmet": false,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "violations": [
+          "NO LEFT GLOVE",
+          "NO VEST",
+          "NO LEFT SHOE",
+          "NO HELMET",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE"
+        ]
+      },
+      "3": {
+        "helmet": true,
+        "vest": false,
+        "left_glove": false,
+        "right_glove": false,
+        "left_shoe": false,
+        "right_shoe": false,
+        "improper_helmet": true,
+        "improper_left_glove": true,
+        "violations": [
+          "NO LEFT GLOVE",
+          "IMPROPER HELMET",
+          "NO VEST",
+          "NO LEFT SHOE",
+          "NO RIGHT GLOVE",
+          "NO RIGHT SHOE"
+        ]
+      }
+    }
+  }
+}

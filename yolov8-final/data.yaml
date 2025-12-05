@@ -1,0 +1,6 @@
+train: data/yolo/train/images
+val: data/yolo/valid/images
+test: data/yolo/test/images
+
+nc: 4
+names: ['glove', 'helmet', 'shoe', 'vest']

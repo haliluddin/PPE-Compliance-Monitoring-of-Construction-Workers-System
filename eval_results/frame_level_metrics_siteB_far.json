@@ -1,0 +1,81 @@
+{
+  "NO HELMET": {
+    "tp": 0,
+    "fp": 5,
+    "fn": 446,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "NO VEST": {
+    "tp": 0,
+    "fp": 4,
+    "fn": 446,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "NO LEFT GLOVE": {
+    "tp": 0,
+    "fp": 6,
+    "fn": 446,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "NO RIGHT GLOVE": {
+    "tp": 0,
+    "fp": 6,
+    "fn": 669,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "NO LEFT SHOE": {
+    "tp": 0,
+    "fp": 5,
+    "fn": 446,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "NO RIGHT SHOE": {
+    "tp": 0,
+    "fp": 6,
+    "fn": 446,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "IMPROPER HELMET": {
+    "tp": 0,
+    "fp": 1,
+    "fn": 0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "IMPROPER LEFT GLOVE": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "IMPROPER RIGHT GLOVE": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "ID_MATCH": {
+    "tp": 0,
+    "fn": 1115,
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "CER_mean": 0.0
+}

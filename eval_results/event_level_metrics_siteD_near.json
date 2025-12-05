@@ -1,0 +1,76 @@
+{
+  "siteD": {
+    "NO LEFT GLOVE": {
+      "tp": 3,
+      "fp": 606,
+      "fn": 0,
+      "precision": 0.0049261083743842365,
+      "recall": 1.0,
+      "f1": 0.00980392156862745
+    },
+    "NO RIGHT GLOVE": {
+      "tp": 3,
+      "fp": 608,
+      "fn": 0,
+      "precision": 0.004909983633387889,
+      "recall": 1.0,
+      "f1": 0.009771986970684038
+    },
+    "NO VEST": {
+      "tp": 3,
+      "fp": 472,
+      "fn": 0,
+      "precision": 0.00631578947368421,
+      "recall": 1.0,
+      "f1": 0.012552301255230124
+    },
+    "NO RIGHT SHOE": {
+      "tp": 3,
+      "fp": 592,
+      "fn": 0,
+      "precision": 0.005042016806722689,
+      "recall": 1.0,
+      "f1": 0.010033444816053512
+    },
+    "NO LEFT SHOE": {
+      "tp": 3,
+      "fp": 561,
+      "fn": 0,
+      "precision": 0.005319148936170213,
+      "recall": 1.0,
+      "f1": 0.010582010582010583
+    },
+    "NO HELMET": {
+      "tp": 2,
+      "fp": 557,
+      "fn": 0,
+      "precision": 0.0035778175313059034,
+      "recall": 1.0,
+      "f1": 0.0071301247771836
+    },
+    "IMPROPER HELMET": {
+      "tp": 1,
+      "fp": 200,
+      "fn": 0,
+      "precision": 0.004975124378109453,
+      "recall": 1.0,
+      "f1": 0.0099009900990099
+    },
+    "IMPROPER RIGHT GLOVE": {
+      "tp": 0,
+      "fp": 4,
+      "fn": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    "IMPROPER LEFT GLOVE": {
+      "tp": 0,
+      "fp": 9,
+      "fn": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  }
+}
