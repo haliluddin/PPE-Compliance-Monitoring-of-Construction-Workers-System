@@ -1,7 +1,7 @@
 // frontend/src/pages/Register.jsx
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { API_BASE } from "../config";   // <-- add/remove this line as needed
+import { useNavigate } from "react-router-dom";
+import { API_BASE } from "../config";
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -11,14 +11,12 @@ export default function Register() {
     confirmPassword: ""
   });
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData(prev => ({ ...prev, [name]: value }));
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: "" }));
     }
@@ -26,78 +24,92 @@ export default function Register() {
 
   const validateForm = () => {
     const newErrors = {};
-    
+
     if (!formData.name.trim()) {
       newErrors.name = "Name is required";
     }
-    
+
     if (!formData.email) {
       newErrors.email = "Email is required";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       newErrors.email = "Please enter a valid email";
     }
-    
+
     if (!formData.password) {
       newErrors.password = "Password is required";
     } else if (formData.password.length < 6) {
       newErrors.password = "Password must be at least 6 characters";
     }
-    
+
     if (formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = "Passwords do not match";
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  if (!validateForm()) return;
+    e.preventDefault();
+    if (!validateForm()) return;
 
-  try {
-    //const response = await fetch("http://127.0.0.1:8000/register", {
-    const response = await fetch(`${API_BASE}/register`, {
+    setSubmitting(true);
+    setErrors({});
 
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: formData.name,
-        email: formData.email,
-        password: formData.password
-      }),
-    });
+    try {
+      const response = await fetch(`${API_BASE}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password
+        }),
+      });
 
-    const data = await response.json();
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {
+        // If server returns no JSON
+      }
 
-    if (!response.ok) {
-      setErrors({ general: data.detail || "Registration failed" });
-      return;
+      if (!response.ok) {
+        setErrors({ general: data?.detail || "Registration failed" });
+        setSubmitting(false);
+        return;
+      }
+
+      // If backend returns token/user like login, store them (optional)
+      if (data?.access_token) {
+        localStorage.setItem("token", data.access_token);
+      }
+      if (data?.user) {
+        localStorage.setItem("user", JSON.stringify(data.user));
+      } else {
+        localStorage.setItem("user", JSON.stringify({ name: formData.name, email: formData.email }));
+      }
+
+      // Navigate to camera (client-side, replace history)
+      navigate("/camera", { replace: true });
+
+    } catch (err) {
+      console.error("Error:", err);
+      setErrors({ general: "Server error. Please try again later." });
+    } finally {
+      setSubmitting(false);
     }
-
-    alert("Registration successful!");
-    window.location.href = "/login";
-
-  } catch (err) {
-    console.error("Error:", err);
-    setErrors({ general: "Server error. Please try again later." });
-  }
-};
-
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#1E1F21] p-4">
-    {errors.general && <p className="text-red-500 text-sm text-center">{errors.general}</p>}
+      {errors.general && <p className="text-red-500 text-sm text-center">{errors.general}</p>}
 
       <div className="w-full max-w-md">
         <div className="bg-[#2A2B30] rounded-xl shadow-2xl overflow-hidden border border-gray-700">
           <div className="px-8 py-6 border-b border-gray-700">
-            <h2 className="text-2xl font-bold text-white text-center">
-              Create Account
-            </h2>
-            <p className="text-gray-400 text-sm text-center mt-1">
-              Get started with us today
-            </p>
+            <h2 className="text-2xl font-bold text-white text-center">Create Account</h2>
+            <p className="text-gray-400 text-sm text-center mt-1">Get started with us today</p>
           </div>
 
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -112,6 +124,7 @@ export default function Register() {
                   errors.name ? 'border-red-500' : 'border-gray-700'
                 } rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all`}
                 placeholder="John Doe"
+                autoComplete="name"
               />
               {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
             </div>
@@ -127,6 +140,7 @@ export default function Register() {
                   errors.email ? 'border-red-500' : 'border-gray-700'
                 } rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all`}
                 placeholder="name@company.com"
+                autoComplete="email"
               />
               {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
             </div>
@@ -142,6 +156,7 @@ export default function Register() {
                   errors.password ? 'border-red-500' : 'border-gray-700'
                 } rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all`}
                 placeholder="••••••••"
+                autoComplete="new-password"
               />
               {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
             </div>
@@ -157,34 +172,30 @@ export default function Register() {
                   errors.confirmPassword ? 'border-red-500' : 'border-gray-700'
                 } rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#5388DF] focus:border-transparent transition-all`}
                 placeholder="••••••••"
+                autoComplete="new-password"
               />
               {errors.confirmPassword && <p className="text-red-400 text-xs mt-1">{errors.confirmPassword}</p>}
             </div>
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 bg-[#5388DF] text-white font-medium rounded-lg hover:bg-[#3a6fc5] transition-colors mt-4"
+              disabled={submitting}
+              className={`w-full py-2.5 px-4 bg-[#5388DF] text-white font-medium rounded-lg hover:bg-[#3a6fc5] transition-colors mt-4 ${submitting ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              Create Account
+              {submitting ? "Creating..." : "Create Account"}
             </button>
 
             <div className="text-center text-sm text-gray-400 mt-4">
-            Already have an account?{" "}
-            <a 
-                href="/login" 
-                onClick={(e) => {
-                e.preventDefault();
-                // Clear any stored form state
-                window.history.replaceState({}, document.title, "/login");
-                // Force a hard navigation
-                window.location.href = '/login';
-                }}
+              Already have an account?{" "}
+              <button
+                type="button"
+                onClick={() => navigate("/login")}
                 className="text-[#5388DF] hover:underline"
-            >
+              >
                 Sign in
-            </a>
+              </button>
             </div>
-                    </form>
+          </form>
         </div>
       </div>
     </div>

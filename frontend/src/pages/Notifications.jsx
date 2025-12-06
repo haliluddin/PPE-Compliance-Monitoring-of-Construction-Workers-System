@@ -215,18 +215,6 @@ export default function Notifications() {
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-8">
-      <header className="mb-6 bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Notifications</h1>
-          <p className="text-gray-400 max-w-2xl">Below are real-time notifications of safety violations detected on site.</p>
-        </div>
-        <div className="relative">
-          <LuBellRing className="text-[#5388DF]" size={32} />
-          {notifications.some((n) => n.isNew) && (
-            <span className="absolute top-0 right-0 block h-3 w-3 rounded-full bg-red-500 animate-pulse"></span>
-          )}
-        </div>
-      </header>
 
       <section className="mb-10">
         <div className="flex flex-col md:flex-row items-stretch md:items-end gap-6">

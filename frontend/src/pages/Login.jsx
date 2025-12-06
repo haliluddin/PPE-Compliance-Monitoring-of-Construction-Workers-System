@@ -85,9 +85,6 @@ export default function Login() {
             <div className="space-y-1">
               <div className="flex justify-between items-center">
                 <label className="block text-sm font-medium text-gray-300">Password</label>
-                <button type="button" className="text-xs text-[#5388DF] hover:underline">
-                  Forgot password?
-                </button>
               </div>
               <input
                 type="password"
