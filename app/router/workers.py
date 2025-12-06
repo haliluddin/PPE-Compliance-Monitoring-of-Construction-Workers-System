@@ -1,5 +1,5 @@
 # app/router/workers.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
@@ -7,18 +7,39 @@ from app.models import Worker, Violation, Camera
 from app.schemas import WorkerResponse, WorkerCreate
 from app.router.auth import get_current_user
 from typing import List
-from fastapi import HTTPException
 import base64
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 router = APIRouter()
+
+# Philippines timezone (UTC+8)
+PH_TZ = timezone(timedelta(hours=8))
+
+def to_iso_ph(dt):
+    """Convert a datetime or date to an ISO string in PH timezone (+08:00).
+    If dt is naive, assume it is in UTC."""
+    if dt is None:
+        return None
+    # date objects (no tzinfo)
+    try:
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(PH_TZ).isoformat()
+        else:
+            # date (no time) -> isoformat (YYYY-MM-DD)
+            return dt.isoformat()
+    except Exception:
+        try:
+            return str(dt)
+        except Exception:
+            return None
 
 @router.get("/workers")
 def get_workers(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
- 
     workers = (
         db.query(
             Worker.id,
@@ -39,20 +60,41 @@ def get_workers(
         .all()
     )
 
-    return [
-        {
+    out = []
+    for w in workers:
+        last_seen_raw = getattr(w, "lastSeen", None)
+        last_seen_iso = None
+        if last_seen_raw:
+            # If naive, treat as UTC then convert to PH timezone
+            try:
+                if getattr(last_seen_raw, "tzinfo", None) is None:
+                    last_seen_dt = last_seen_raw.replace(tzinfo=timezone.utc)
+                else:
+                    last_seen_dt = last_seen_raw
+                last_seen_iso = last_seen_dt.astimezone(PH_TZ).isoformat()
+            except Exception:
+                # fallback: string conversion
+                try:
+                    last_seen_iso = str(last_seen_raw)
+                except Exception:
+                    last_seen_iso = None
+
+        date_added = getattr(w, "dateAdded", None)
+        date_added_out = date_added.isoformat() if getattr(date_added, "isoformat", None) else date_added
+
+        out.append({
             "id": w.id,
             "fullName": w.fullName,
             "worker_code": w.worker_code,
-            "dateAdded": w.dateAdded,
+            "dateAdded": date_added_out,
             "status": w.status,
             "registered": w.registered,
             "user_id": w.user_id,
             "totalIncidents": w.totalIncidents,
-             "lastSeen": (w.lastSeen.replace(tzinfo=timezone.utc).astimezone(PH_TZ).isoformat() if w.lastSeen and w.lastSeen.tzinfo is None else (w.lastSeen.astimezone(PH_TZ).isoformat() if w.lastSeen else None))
-        }
-        for w in workers
-    ]
+            "lastSeen": last_seen_iso
+        })
+
+    return out
 
 # -----------------------------
 # POST add worker
@@ -106,7 +148,7 @@ def get_worker_profile(
         Worker.id == worker_id,
         Worker.user_id == current_user.id
     ).first()
-    
+
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -134,7 +176,7 @@ def get_worker_profile(
             except Exception:
                 snap_b64 = None
         camera_display = _format_camera_display(v.camera_name, v.camera_location)
-        created_iso = v.created_at.isoformat() if v.created_at else None
+        created_iso = to_iso_ph(getattr(v, "created_at", None))
         violation_history.append({
             "id": v.id,
             "date": created_iso,
