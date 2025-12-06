@@ -7,13 +7,15 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 import bcrypt
-from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from jose import JWTError, jwt, ExpiredSignatureError
+from datetime import datetime, timedelta, timezone
+import os
 
 router = APIRouter()
-SECRET_KEY = "supersecretkey"
+# recommended: load secret from env in production
+SECRET_KEY = os.environ.get("APP_SECRET_KEY", "supersecretkey")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS = 2
+ACCESS_TOKEN_EXPIRE_HOURS = int(os.environ.get("ACCESS_TOKEN_EXPIRE_HOURS", "2"))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 class LoginSchema(BaseModel):
@@ -64,8 +66,10 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
     user = authenticate_user(db, data.email, data.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    token_data = {"sub": str(user.id), "email": user.email, "exp": expire}
+    expire_dt = datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    # JWT exp should be numeric timestamp (seconds since epoch)
+    exp_ts = int(expire_dt.timestamp())
+    token_data = {"sub": str(user.id), "email": user.email, "exp": exp_ts}
     token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
     return {
         "access_token": token,
@@ -97,6 +101,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         user_id: str = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
     result = db.execute(select(User).where(User.id == int(user_id)))
@@ -106,12 +112,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 def verify_token(token: str):
-    """Decode a JWT token and return its payload."""
-    from jose import JWTError, jwt
-
+    from jose import JWTError, jwt, ExpiredSignatureError
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload  # returns dict like {"sub": "1", "email": "...", "exp": ...}
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
     except JWTError as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
-

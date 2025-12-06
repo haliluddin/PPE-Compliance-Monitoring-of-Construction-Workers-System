@@ -39,24 +39,20 @@ def get_workers(
         .all()
     )
 
-   
     return [
         {
             "id": w.id,
             "fullName": w.fullName,
             "worker_code": w.worker_code,
-            # "assignedLocation": w.assignedLocation,
-            # "role": w.role,
             "dateAdded": w.dateAdded,
             "status": w.status,
             "registered": w.registered,
             "user_id": w.user_id,
             "totalIncidents": w.totalIncidents,
-             "lastSeen": w.lastSeen.isoformat() if w.lastSeen else None
+             "lastSeen": (w.lastSeen.replace(tzinfo=timezone.utc).astimezone(PH_TZ).isoformat() if w.lastSeen and w.lastSeen.tzinfo is None else (w.lastSeen.astimezone(PH_TZ).isoformat() if w.lastSeen else None))
         }
         for w in workers
     ]
-
 
 # -----------------------------
 # POST add worker

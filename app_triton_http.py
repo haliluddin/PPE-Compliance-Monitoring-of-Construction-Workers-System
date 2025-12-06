@@ -1,4 +1,4 @@
-# app_triton_http.py
+# app_triton_http.py (updated - timezone-aware fixes)
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -12,7 +12,7 @@ import asyncio
 import json
 import threading
 from urllib.parse import urlparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,6 +94,28 @@ STREAM_THREADS = {}
 STREAM_EVENTS = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
+
+# Philippines timezone helper
+PH_TZ = timezone(timedelta(hours=8))
+
+def to_iso_ph(dt):
+    """
+    Convert a datetime to an ISO string in PH timezone (+08:00).
+    If dt is naive, assume UTC then convert.
+    If dt is None, return None.
+    """
+    if dt is None:
+        return None
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(PH_TZ).isoformat()
+    except Exception:
+        try:
+            return dt.isoformat()
+        except Exception:
+            return None
+
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -290,7 +312,8 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
         job = sess.query(Job).filter(Job.id == job_id).first()
         if job:
             job.status = "running"
-            job.started_at = datetime.utcnow()
+            # store timezone-aware UTC
+            job.started_at = datetime.now(timezone.utc)
             sess.commit()
         while True:
             ret, frame = cap.read()
@@ -326,13 +349,13 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             frame_idx += 1
         if job:
             job.status = "completed"
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now(timezone.utc)
             sess.commit()
     except Exception:
         try:
             if job:
                 job.status = "error"
-                job.finished_at = datetime.utcnow()
+                job.finished_at = datetime.now(timezone.utc)
                 sess.commit()
         except Exception:
             pass
@@ -380,7 +403,7 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             job = sess.query(Job).filter(Job.id == job_id).first()
             if job:
                 job.status = "running"
-                job.started_at = datetime.utcnow()
+                job.started_at = datetime.now(timezone.utc)
                 sess.commit()
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -414,7 +437,7 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             frame_idx += 1
         if job:
             job.status = "completed"
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now(timezone.utc)
             sess.commit()
     finally:
         try:
@@ -459,7 +482,7 @@ def stop_stream(job_id: int):
         job = sess.query(Job).filter(Job.id == job_id).first()
         if job:
             job.status = "stopped"
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now(timezone.utc)
             sess.commit()
     finally:
         sess.close()
@@ -527,7 +550,14 @@ def job_status(job_id: int):
         job = sess.query(Job).filter(Job.id == job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail="job not found")
-        return {"job_id": job.id, "status": job.status, "meta": job.meta, "created_at": job.created_at, "started_at": job.started_at, "finished_at": job.finished_at}
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "meta": job.meta,
+            "created_at": to_iso_ph(getattr(job, "created_at", None)),
+            "started_at": to_iso_ph(getattr(job, "started_at", None)),
+            "finished_at": to_iso_ph(getattr(job, "finished_at", None))
+        }
     finally:
         sess.close()
 @app.get("/violations")
@@ -577,7 +607,8 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
                 "violation_types": r.violation_types,
                 "violation": r.violation_types,
                 "frame_index": r.frame_index,
-                "created_at": r.created_at,
+                # convert created_at to PH timezone string
+                "created_at": to_iso_ph(getattr(r, "created_at", None)),
                 "status": getattr(r, "status", "Pending"),
                 "camera": camera_name,
                 "camera_location": camera_location,
@@ -603,7 +634,7 @@ def update_violation_status(violation_id: int, payload: dict = Body(...)):
         except Exception:
             sess.rollback()
             raise
-        notif_payload = {"type": "status_update", "violation_id": v.id, "status": v.status}
+        notif_payload = {"type": "status_update", "violation_id": v.id, "status": v.status, "created_at": to_iso_ph(datetime.now(timezone.utc))}
         try:
             if redis_sync is not None:
                 try:
@@ -675,7 +706,7 @@ def get_notifications(limit: int = 100, offset: int = 0):
                 "violation": getattr(r, "violation_types", None) or "Unknown Violation",
                 "camera": camera_name,
                 "camera_location": camera_location,
-                "created_at": r.created_at,
+                "created_at": to_iso_ph(getattr(r, "created_at", None)),
                 "is_read": getattr(r, "is_read", False),
                 "status": getattr(r, "status", "Pending"),
                 "type": "worker_violation",
@@ -738,13 +769,15 @@ def create_camera(payload: dict = Body(...)):
 def quick_reports(period: str = "today"):
     sess = SessionLocal()
     try:
-        now = datetime.utcnow()
+        # use timezone-aware UTC reference
+        now = datetime.now(timezone.utc)
         if period == "last_week":
             start = now - timedelta(days=7)
         elif period == "last_month":
             start = now - timedelta(days=30)
         else:
-            start = datetime(now.year, now.month, now.day)
+            # start of local day in UTC-aware object; keep same day boundary as before
+            start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
         rows = sess.query(Violation).filter(Violation.created_at >= start).all()
         total_incidents = len(rows)
         counts = {}
@@ -800,7 +833,7 @@ def quick_reports(period: str = "today"):
 def reports_performance(period: str = "today"):
     sess = SessionLocal()
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if period == "last_week":
             start = now - timedelta(days=7)
             days = 7
@@ -808,7 +841,7 @@ def reports_performance(period: str = "today"):
             start = now - timedelta(days=30)
             days = 30
         else:
-            start = datetime(now.year, now.month, now.day)
+            start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
             days = 1
         rows = sess.query(Violation).filter(Violation.created_at >= start).all()
         date_buckets = {}
@@ -817,7 +850,7 @@ def reports_performance(period: str = "today"):
             dt = getattr(v, "created_at", None)
             if not dt:
                 continue
-            date_key = dt.strftime("%Y-%m-%d")
+            date_key = (dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)).astimezone(PH_TZ).strftime("%Y-%m-%d")
             date_buckets.setdefault(date_key, {"violations": 0, "compliance": 0})
             date_buckets[date_key]["violations"] += 1
             if getattr(v, "status", "").lower() == "resolved":
@@ -834,13 +867,13 @@ def reports_performance(period: str = "today"):
 def reports_export(period: str = "today"):
     sess = SessionLocal()
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if period == "last_week":
             start = now - timedelta(days=7)
         elif period == "last_month":
             start = now - timedelta(days=30)
         else:
-            start = datetime(now.year, now.month, now.day)
+            start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
         rows = sess.query(Violation).filter(Violation.created_at >= start).all()
         si = io.StringIO()
         cw = csv.writer(si)
@@ -863,6 +896,7 @@ def reports_export(period: str = "today"):
                     cam_loc = getattr(cam, "location", "") or cam_name
             except Exception:
                 pass
+            created_at_str = to_iso_ph(getattr(v, "created_at", None))
             cw.writerow([
                 getattr(v, "id", ""),
                 getattr(v, "worker_code", ""),
@@ -870,7 +904,7 @@ def reports_export(period: str = "today"):
                 getattr(v, "violation_types", "") or getattr(v, "violation_type", ""),
                 cam_name,
                 cam_loc,
-                getattr(v, "created_at", ""),
+                created_at_str,
                 getattr(v, "status", "Pending")
             ])
         output = si.getvalue()

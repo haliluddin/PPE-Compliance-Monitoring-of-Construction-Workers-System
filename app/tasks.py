@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import logging
 from sqlalchemy import or_
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from threading import Lock
 
 from urllib.parse import urlparse
@@ -302,6 +302,20 @@ def _process_image(image_bytes, meta=None):
         pose = init_pose()
         person_boxes = None
         triton_out_for_ppe = None
+
+        # normalize frame timestamp (meta.get("ts")) into a timezone-aware UTC datetime
+        meta = meta or {}
+        raw_ts = meta.get("ts")
+        frame_ts_dt = None
+        if raw_ts is not None:
+            try:
+                frame_ts_float = float(raw_ts)
+                frame_ts_dt = datetime.fromtimestamp(frame_ts_float, tz=timezone.utc)
+            except Exception:
+                frame_ts_dt = datetime.now(timezone.utc)
+        else:
+            frame_ts_dt = None
+
         if triton is not None:
             try:
                 human_meta = triton.get_model_metadata(HUMAN_MODEL)
@@ -365,17 +379,17 @@ def _process_image(image_bytes, meta=None):
         annotated = None
         if isinstance(result, dict) and "annotated_bgr" in result:
             annotated = result.pop("annotated_bgr")
-        meta = meta or {}
         job_id = meta.get("job_id")
         camera_id = meta.get("camera_id")
         frame_idx = meta.get("frame_idx")
-        frame_ts = meta.get("ts")
+        # Use timezone-aware UTC for job timestamps
         sess = SessionLocal()
+        job = None
         if job_id is not None:
             job = sess.query(Job).filter(Job.id == job_id).first()
             if job and getattr(job, "status", None) == "queued":
                 job.status = "running"
-                job.started_at = datetime.utcnow()
+                job.started_at = datetime.now(timezone.utc)  # timezone-aware
                 sess.commit()
         people = result.get("people", [])
         r = get_redis()
@@ -443,7 +457,8 @@ def _process_image(image_bytes, meta=None):
                 pass
         tracker = get_global_tracker()
         try:
-            tracker.update_tracks(people, frame_idx or 0, datetime.utcfromtimestamp(frame_ts) if frame_ts else datetime.utcnow(), annotated_bytes, sess, job_id=job_id, camera_id=camera_id, job_user_id=job.user_id if job is not None else None)
+            # pass timezone-aware frame timestamp (UTC) to tracker
+            tracker.update_tracks(people, frame_idx or 0, frame_ts_dt if frame_ts_dt is not None else datetime.now(timezone.utc), annotated_bytes, sess, job_id=job_id, camera_id=camera_id, job_user_id=job.user_id if job is not None else None)
         except Exception:
             sess.rollback()
         return {"status": "ok", "meta": meta, "result_summary": {"people": len(people)}}

@@ -276,7 +276,11 @@ export default function Notifications() {
 
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-3xl font-bold text-white">Notifications</h2>
+          <div>
+            <h2 className="text-xl font-semibold mb-4 text-white">Violation Alerts</h2>
+            <p className="text-gray-300 text-sm mb-6">Below are the real-timw notifications of violations detected on site.</p>
+          </div>
+
           <div className="flex space-x-2">
             {[{ key: "all", label: `All (${notifications.length})` },{ key: "unread", label: `Unread (${notifications.filter((n) => n.isNew).length})` }].map((tab) => (
               <button

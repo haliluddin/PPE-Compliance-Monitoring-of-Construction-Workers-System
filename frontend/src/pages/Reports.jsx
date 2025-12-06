@@ -306,9 +306,6 @@ export default function Reports() {
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6" id="printable-reports">
-      <header className="bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg mb-8">
-        <h1 className="text-2xl font-bold text-gray-100">REPORTS</h1>
-      </header>
 
       <div className="flex flex-wrap items-center gap-4 mb-6">
         <div className="relative flex-1 min-w-[250px] max-w-md">

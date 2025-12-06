@@ -47,7 +47,13 @@ def get_violations(db: Session = Depends(get_db), current_user: User = Depends(g
         camera_display = _format_camera_display(v.camera_name, v.camera_location)
         created_at_iso = None
         if getattr(v.Violation, "created_at", None):
-            created_at_iso = v.Violation.created_at.isoformat()
+            try:
+                if v.Violation.created_at.tzinfo is None:
+                    created_at_iso = v.Violation.created_at.replace(tzinfo=timezone.utc).astimezone(PH_TZ).isoformat()
+                else:
+                    created_at_iso = v.Violation.created_at.astimezone(PH_TZ).isoformat()
+            except Exception:
+                created_at_iso = v.Violation.created_at.isoformat()
         out.append({
             "id": v.Violation.id,
             "violation_types": v.Violation.violation_types,

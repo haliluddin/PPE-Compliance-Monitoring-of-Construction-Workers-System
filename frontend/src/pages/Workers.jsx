@@ -85,7 +85,6 @@ export default function Workers() {
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6">
       <header className="bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-100">Worker Management</h1>
         <div className="flex items-center space-x-2 text-gray-300">
           <span className="text-lg font-semibold">Total Workers:</span>
           <span className="text-xl font-bold text-[#5388DF]">{workers.length}</span>

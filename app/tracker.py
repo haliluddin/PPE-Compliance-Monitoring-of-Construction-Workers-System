@@ -1,6 +1,7 @@
 import time
 from threading import Lock
 from collections import defaultdict
+from datetime import datetime, timezone   # <-- added
 
 class SimpleTracker:
     def __init__(self, iou_thresh=0.3, lost_frames_thresh=30, persist_K=3, persist_M=5):
@@ -22,6 +23,7 @@ class SimpleTracker:
     def match_boxes(self, boxes, frame_idx):
         with self.lock:
             assignments = {}
+            used = set()
             for bi, box in enumerate(boxes):
                 best_tid = None
                 best_iou = 0.0
@@ -37,6 +39,7 @@ class SimpleTracker:
                     self.tracks[best_tid]["bbox"] = box
                     self.tracks[best_tid]["last_seen_frame"] = frame_idx
                     self.tracks[best_tid]["age"] += 1
+                    used.add(best_tid)
                 else:
                     tid = self.next_id
                     self.next_id += 1
@@ -48,7 +51,7 @@ class SimpleTracker:
                         "viol_buf": [],
                         "id_buf": [],
                         "started_events": set(),
-                        "agg_violation_id": None,
+                        "db_events": {},
                         "finalized": False
                     }
                     assignments[bi] = tid
@@ -74,6 +77,14 @@ class SimpleTracker:
         with self.lock:
             for tid, t in list(self.tracks.items()):
                 if frame_idx - t["last_seen_frame"] > self.lost_frames_thresh and not t.get("finalized"):
+                    for vtype, vio_id in t.get("db_events", {}).items():
+                        try:
+                            from app.models import Violation
+                            vio = sess.query(Violation).filter(Violation.id == vio_id).first()
+                            if vio:
+                                sess.commit()
+                        except Exception:
+                            sess.rollback()
                     t["finalized"] = True
                     to_remove.append(tid)
             for tid in to_remove:
@@ -110,6 +121,7 @@ class SimpleTracker:
                 best_id = self._resolve_best_id_from_buf(track)
                 worker_code = None
                 worker_obj = None
+                display_name = None
                 if best_id is not None:
                     s = str(best_id)
                     if s.startswith("UNREG:"):
@@ -121,27 +133,54 @@ class SimpleTracker:
                         worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first() if worker_code else None
                     except Exception:
                         worker_obj = None
-                current_started = set()
-                for vtype in viols:
-                    if vtype in track["started_events"]:
-                        current_started.add(vtype)
-                    else:
-                        if self._should_start_violation(track, vtype):
-                            current_started.add(vtype)
-                if current_started:
-                    if track.get("agg_violation_id") is None:
-                        try:
-                            from app.models import Violation, Notification
-                            snap_bytes = annotated_snapshot
-                            inference_json = {"person": p}
-                            should_save = True if worker_obj is not None and getattr(worker_obj, "registered", True) else False
+
+                # Unified violation handling (single DB event for simultaneous violations)
+                persistent_new = set(v for v in viols if v not in track["started_events"] and self._should_start_violation(track, v))
+                current_viols = set(viols)
+                existing_ids = set(track["db_events"].get(v) for v in current_viols if track["db_events"].get(v) is not None)
+                existing_id = next(iter(existing_ids), None)
+
+                def _update_violation_row(vio_id, types_list):
+                    try:
+                        from app.models import Violation
+                        vio = sess.query(Violation).filter(Violation.id == vio_id).first()
+                        if not vio:
+                            return None
+                        vio.violation_types = ", ".join(sorted(types_list))
+                        if annotated_snapshot is not None:
+                            vio.snapshot = annotated_snapshot
+                        vio.frame_index = frame_idx
+                        vio.frame_ts = frame_ts
+                        vio.inference = {"person": p}
+                        sess.commit()
+                        return vio.id
+                    except Exception:
+                        sess.rollback()
+                        return None
+
+                if persistent_new:
+                    try:
+                        from app.models import Violation, Notification
+                        snap_bytes = annotated_snapshot
+                        inference_json = {"person": p}
+                        should_save = True if worker_obj is not None and getattr(worker_obj, "registered", True) else False
+
+                        full_types = sorted(list(current_viols)) if current_viols else sorted(list(persistent_new))
+
+                        if existing_id:
+                            updated_id = _update_violation_row(existing_id, full_types)
+                            if updated_id:
+                                for vt in full_types:
+                                    track["db_events"][vt] = updated_id
+                        else:
                             if should_save:
+                                # Ensure frame_ts is timezone-aware; we assume tasks passes tz-aware UTC
                                 vio = Violation(
                                     job_id=job_id,
                                     camera_id=camera_id,
                                     worker_id=worker_obj.id if worker_obj is not None else None,
                                     worker_code=worker_code,
-                                    violation_types=",".join(sorted(current_started)),
+                                    violation_types=", ".join(full_types),
                                     frame_index=frame_idx,
                                     frame_ts=frame_ts,
                                     snapshot=snap_bytes,
@@ -152,12 +191,16 @@ class SimpleTracker:
                                 sess.add(vio)
                                 sess.commit()
                                 sess.refresh(vio)
-                                track["agg_violation_id"] = vio.id
+                                for vt in full_types:
+                                    track["db_events"][vt] = vio.id
+
+                                # create notification with timezone-aware created_at (use frame_ts if provided else now UTC)
                                 try:
+                                    created_at_val = frame_ts if frame_ts is not None else datetime.now(timezone.utc)
                                     notif = Notification(
-                                        message=f"New violation: {vio.violation_types} ({worker_code})",
+                                        message=f"New violation: {', '.join(full_types)} ({worker_code})",
                                         is_read=False,
-                                        created_at=frame_ts if frame_ts else None,
+                                        created_at=created_at_val,
                                         user_id=vio.user_id,
                                         violation_id=vio.id
                                     )
@@ -165,27 +208,35 @@ class SimpleTracker:
                                     sess.commit()
                                 except Exception:
                                     sess.rollback()
-                            track["started_events"].update(current_started)
-                        except Exception:
-                            sess.rollback()
-                    else:
-                        try:
-                            from app.models import Violation
-                            vio = sess.query(Violation).filter(Violation.id == track["agg_violation_id"]).first()
-                            if vio:
-                                existing = set([s.strip() for s in (vio.violation_types or "").split(",") if s.strip()])
-                                newset = existing.union(current_started)
-                                vio.violation_types = ",".join(sorted(newset))
-                                if annotated_snapshot is not None:
-                                    vio.snapshot = annotated_snapshot
-                                vio.frame_index = frame_idx
-                                vio.frame_ts = frame_ts
-                                vio.inference = {"person": p}
-                                sess.commit()
-                                track["started_events"].update(current_started)
-                        except Exception:
-                            sess.rollback()
-                results.append({"track_id": tid, "best_id": best_id, "violations": list(viols), "agg_violation_id": track.get("agg_violation_id")})
+
+                        track["started_events"].update(current_viols)
+
+                    except Exception:
+                        sess.rollback()
+                else:
+                    if current_viols:
+                        if existing_id:
+                            _update_violation_row(existing_id, sorted(list(current_viols)))
+                            for vt in current_viols:
+                                track["db_events"][vt] = existing_id
+                        else:
+                            for vtype in current_viols:
+                                vio_id = track["db_events"].get(vtype)
+                                if vio_id:
+                                    try:
+                                        from app.models import Violation
+                                        vio = sess.query(Violation).filter(Violation.id == vio_id).first()
+                                        if vio:
+                                            if annotated_snapshot is not None:
+                                                vio.snapshot = annotated_snapshot
+                                            vio.frame_index = frame_idx
+                                            vio.frame_ts = frame_ts
+                                            vio.inference = {"person": p}
+                                            sess.commit()
+                                    except Exception:
+                                        sess.rollback()
+
+                results.append({"track_id": tid, "best_id": best_id, "violations": list(viols)})
         self.finalize_stale(frame_idx, sess)
         return results
 

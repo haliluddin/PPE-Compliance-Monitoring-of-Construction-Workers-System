@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Notification, Violation, Worker, Camera, User
+from app.models import Notification, Violation, Worker, Camera
 from app.router.auth import get_current_user
-from app.router.notifications_ws import broadcast_notification
 import base64
 from datetime import datetime, timezone, timedelta
 
@@ -21,7 +20,7 @@ def _format_camera_display(camera_name, camera_location):
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 @router.get("/")
-def get_notifications(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_notifications(db: Session = Depends(get_db), current_user: Depends = Depends(get_current_user)):
     notifications = (
         db.query(
             Notification,
@@ -48,7 +47,16 @@ def get_notifications(db: Session = Depends(get_db), current_user: User = Depend
             except Exception:
                 snap_b64 = None
         camera_display = _format_camera_display(getattr(n, "camera_name", None), getattr(n, "camera_location", None))
-        created_iso = n.Notification.created_at.isoformat() if n.Notification.created_at else None
+        # convert Notification.created_at to PH timezone for display (assume UTC if naive)
+        created_iso = None
+        if n.Notification.created_at:
+            try:
+                if n.Notification.created_at.tzinfo is None:
+                    created_iso = n.Notification.created_at.replace(tzinfo=timezone.utc).astimezone(PH_TZ).isoformat()
+                else:
+                    created_iso = n.Notification.created_at.astimezone(PH_TZ).isoformat()
+            except Exception:
+                created_iso = n.Notification.created_at.isoformat()
         out.append({
             "id": n.Notification.id,
             "violation_id": vobj.id if vobj else None,
