@@ -36,6 +36,7 @@ except Exception:
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
+from sqlalchemy import cast, Date
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
 app.add_middleware(
@@ -716,8 +717,30 @@ def update_violation_status(violation_id: int, payload: dict = Body(...)):
         new_status = payload.get("status")
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
+        new_status = str(new_status).strip()
         try:
             v.status = new_status
+            if new_status.strip().lower() == "resolved":
+                now_utc = datetime.now(timezone.utc)
+                if hasattr(v, "resolved_at"):
+                    try:
+                        if not getattr(v, "resolved_at", None):
+                            v.resolved_at = now_utc
+                    except Exception:
+                        pass
+                try:
+                    created_at = getattr(v, "created_at", None)
+                    if created_at:
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=timezone.utc)
+                        minutes = (now_utc - created_at).total_seconds() / 60.0
+                        if hasattr(v, "response_time"):
+                            try:
+                                v.response_time = round(minutes, 2)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             sess.commit()
             sess.refresh(v)
         except Exception:
@@ -865,12 +888,14 @@ def quick_reports(period: str = "today"):
             start = now - timedelta(days=30)
         else:
             start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-        rows = sess.query(Violation).filter(Violation.created_at >= start).all()
+        start_date_local = start.astimezone(PH_TZ).date()
+        rows = sess.query(Violation).filter(cast(Violation.created_at, Date) >= start_date_local).all()
         total_incidents = len(rows)
         counts = {}
+        resolved_by_worker = {}
         camera_counts = {}
         type_counts = {}
-        resolved = 0
+        resolved_total = 0
         for v in rows:
             worker_display = None
             try:
@@ -897,13 +922,19 @@ def quick_reports(period: str = "today"):
                     type_counts[str(vt)] = type_counts.get(str(vt), 0) + 1
             else:
                 type_counts["Unknown"] = type_counts.get("Unknown", 0) + 1
-            if getattr(v, "status", "").lower() == "resolved":
-                resolved += 1
+            status = (getattr(v, "status", "") or "").strip().lower()
+            if status == "resolved":
+                resolved_total += 1
+                resolved_by_worker[worker_display] = resolved_by_worker.get(worker_display, 0) + 1
         top_offenders = [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
         camera_data = [{"location": k, "violations": v, "risk": "High" if v > 5 else "Medium" if v > 2 else "Low"} for k, v in camera_counts.items()]
         most_violations = [{"name": k, "violations": v} for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)]
-        worker_data = [{"rank": i+1, "name": k, "violations": v, "resolved": 0, "resolution_rate": 0} for i, (k, v) in enumerate(sorted(counts.items(), key=lambda x: x[1], reverse=True))]
-        violation_resolution_rate = round((resolved / total_incidents * 100) if total_incidents > 0 else 0, 2)
+        worker_data = []
+        for i, (k, v) in enumerate(sorted(counts.items(), key=lambda x: x[1], reverse=True)):
+            resolved_count = resolved_by_worker.get(k, 0)
+            resolution_rate = round((resolved_count / v) * 100, 2) if v > 0 else 0
+            worker_data.append({"rank": i + 1, "name": k, "violations": v, "resolved": resolved_count, "resolution_rate": resolution_rate})
+        violation_resolution_rate = round((resolved_total / total_incidents * 100) if total_incidents > 0 else 0, 2)
         return {
             "total_incidents": total_incidents,
             "total_workers_involved": len(counts),
@@ -930,23 +961,38 @@ def reports_performance(period: str = "today"):
         else:
             start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
             days = 1
-        rows = sess.query(Violation).filter(Violation.created_at >= start).all()
+        start_date_local = start.astimezone(PH_TZ).date()
+        rows = sess.query(Violation).filter(cast(Violation.created_at, Date) >= start_date_local).all()
         date_buckets = {}
         response_times = []
         for v in rows:
             dt = getattr(v, "created_at", None)
             if not dt:
                 continue
-            date_key = (dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)).astimezone(PH_TZ).strftime("%Y-%m-%d")
+            try:
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+            date_key = dt.astimezone(PH_TZ).strftime("%Y-%m-%d")
             date_buckets.setdefault(date_key, {"violations": 0, "compliance": 0})
             date_buckets[date_key]["violations"] += 1
-            if getattr(v, "status", "").lower() == "resolved":
+            if getattr(v, "status", "").strip().lower() == "resolved":
                 date_buckets[date_key]["compliance"] += 1
             rt = getattr(v, "response_time", None)
+            if rt is None:
+                resolved_at = getattr(v, "resolved_at", None) or getattr(v, "finished_at", None)
+                if resolved_at and dt:
+                    try:
+                        if resolved_at.tzinfo is None:
+                            resolved_at = resolved_at.replace(tzinfo=timezone.utc)
+                        rt = (resolved_at - dt).total_seconds() / 60.0
+                    except Exception:
+                        rt = None
             if isinstance(rt, (int, float)):
                 response_times.append(float(rt))
         performance_over_time = [{"date": k, "violations": v["violations"], "compliance": v["compliance"]} for k, v in sorted(date_buckets.items())]
-        average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0
+        average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0.0
         return {"performance_over_time": performance_over_time, "average_response_time": average_response_time}
     finally:
         sess.close()
@@ -961,7 +1007,8 @@ def reports_export(period: str = "today"):
             start = now - timedelta(days=30)
         else:
             start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-        rows = sess.query(Violation).filter(Violation.created_at >= start).all()
+        start_date_local = start.astimezone(PH_TZ).date()
+        rows = sess.query(Violation).filter(cast(Violation.created_at, Date) >= start_date_local).all()
         si = io.StringIO()
         cw = csv.writer(si)
         cw.writerow(["id", "worker_code", "worker_name", "violation_types", "camera", "camera_location", "created_at", "status"])
