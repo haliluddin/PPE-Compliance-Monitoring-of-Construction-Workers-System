@@ -1,4 +1,3 @@
-# app/router/reports.py
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, case
@@ -28,8 +27,10 @@ def _period_bounds(period: str):
         start_ph = today_start_ph
         end_ph = start_ph + timedelta(days=1)
         days = 1
-    start_utc = start_ph.astimezone(timezone.utc)
-    end_utc = end_ph.astimezone(timezone.utc)
+
+    # Convert to UTC and then drop tzinfo to match typical DB-stored naive UTC datetimes
+    start_utc = start_ph.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_ph.astimezone(timezone.utc).replace(tzinfo=None)
     return start_ph, start_utc, end_utc, days
 
 def _to_iso_ph(dt):

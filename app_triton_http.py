@@ -1,3 +1,4 @@
+# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -877,8 +878,9 @@ def _period_bounds(period: str):
         start_ph = today_start_ph
         end_ph = start_ph + timedelta(days=1)
         days = 1
-    start_utc = start_ph.astimezone(timezone.utc)
-    end_utc = end_ph.astimezone(timezone.utc)
+
+    start_utc = start_ph.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_ph.astimezone(timezone.utc).replace(tzinfo=None)
     return start_ph, start_utc, end_utc, days
 @app.get("/reports")
 def quick_reports(period: str = "today"):
