@@ -18,6 +18,7 @@ export default function Camera() {
   const [addingCamera, setAddingCamera] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [selectedCameraJobId, setSelectedCameraJobId] = useState(null);
+  const videoRef = useRef(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -136,6 +137,20 @@ export default function Camera() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      if (videoRef.current && selectedCameraJobId) {
+        const sel = cameras.find(c => String(c.job_id) === String(selectedCameraJobId)) || null;
+        if (sel && (sel.videoUrl || sel.frameSrc)) {
+          const p = videoRef.current.play();
+          if (p && typeof p.then === "function") {
+            p.catch(() => {});
+          }
+        }
+      }
+    } catch (e) {}
+  }, [selectedCameraJobId, cameras]);
 
   const formattedDate = currentTime.toLocaleDateString();
   const formattedTime = currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -419,11 +434,22 @@ export default function Camera() {
               </div>
             </div>
             <div className="w-full h-[60vh] bg-black rounded overflow-hidden flex items-center justify-center">
-               {selectedCamera.frameSrc ? (
-                <img alt="annotated" src={selectedCamera.frameSrc} className="object-contain w-full h-full" />
-              ) : (
-                <video controls src={selectedCamera.videoUrl} className="object-contain w-full h-full" />
-              )}
+              {(() => {
+                const isStream = !!(selectedCamera?.meta && (selectedCamera.meta.is_stream === true || selectedCamera.meta.is_stream === "true"));
+                if (isStream && selectedCamera.frameSrc) {
+                  return <img alt="annotated" src={selectedCamera.frameSrc} className="object-contain w-full h-full" />;
+                }
+                const videoSrc = selectedCamera.videoUrl || selectedCamera.frameSrc || null;
+                return (
+                  <video
+                    key={String(selectedCamera.job_id || selectedCamera.camera_id || "video")}
+                    ref={videoRef}
+                    controls
+                    src={videoSrc}
+                    className="object-contain w-full h-full"
+                  />
+                );
+              })()}
             </div>
             <div className="mt-3 text-xs text-gray-300">
               <pre className="text-xs text-gray-400 max-h-32 overflow-auto">{JSON.stringify(selectedCamera.latest_people || [], null, 2)}</pre>

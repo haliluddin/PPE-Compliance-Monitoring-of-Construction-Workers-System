@@ -359,7 +359,7 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
         job = sess.query(Job).filter(Job.id == job_id).first()
         if job:
             job.status = "running"
-            job.started_at = datetime.now(PH_TZ)
+            job.started_at = datetime.now(timezone.utc)
             sess.commit()
         while True:
             ret, frame = cap.read()
@@ -398,13 +398,13 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
         consumer_thread.join(timeout=1.0)
         if job:
             job.status = "completed"
-            job.finished_at = datetime.now(PH_TZ)
+            job.finished_at = datetime.now(timezone.utc)
             sess.commit()
     except Exception:
         try:
             if job:
                 job.status = "error"
-                job.finished_at = datetime.now(PH_TZ)
+                job.finished_at = datetime.now(timezone.utc)
                 sess.commit()
         except Exception:
             pass
@@ -485,7 +485,7 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             job = sess.query(Job).filter(Job.id == job_id).first()
             if job:
                 job.status = "running"
-                job.started_at = datetime.now(PH_TZ)
+                job.started_at = datetime.now(timezone.utc)
                 sess.commit()
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -527,7 +527,7 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
         consumer_thread.join(timeout=1.0)
         if job:
             job.status = "completed"
-            job.finished_at = datetime.now(PH_TZ)
+            job.finished_at = datetime.now(timezone.utc)
             sess.commit()
     finally:
         try:
@@ -575,7 +575,7 @@ def stop_stream(job_id: int):
         job = sess.query(Job).filter(Job.id == job_id).first()
         if job:
             job.status = "stopped"
-            job.finished_at = datetime.now(PH_TZ)
+            job.finished_at = datetime.now(timezone.utc)
             sess.commit()
     finally:
         sess.close()
