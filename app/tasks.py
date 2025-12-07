@@ -474,7 +474,22 @@ if celery:
     def process_image_task(self, image_bytes, meta=None):
         return _process_image(image_bytes, meta)
 else:
+    def _bg_wrapper(image_bytes, meta=None):
+        try:
+            _process_image(image_bytes, meta)
+        except Exception:
+            log.exception("background _process_image failed")
+
     def process_image_task(*args, **kwargs):
-        return _process_image(*args, **kwargs)
+        """Schedule _process_image to run in a daemon thread and return immediately."""
+        try:
+            t = threading.Thread(target=_bg_wrapper, args=(args[0] if args else None, kwargs.get('meta') if kwargs else None), daemon=True)
+            t.start()
+            return {"status": "scheduled"}
+        except Exception:
+            log.exception("failed to spawn thread for process_image_task, running synchronously")
+            return _process_image(*args, **kwargs)
+
+    
 def process_image(image_bytes, meta=None):
     return _process_image(image_bytes, meta)

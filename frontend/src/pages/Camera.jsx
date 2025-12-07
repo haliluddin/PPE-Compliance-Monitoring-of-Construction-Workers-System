@@ -1,3 +1,4 @@
+//frontend/src/pages/Camera.jsx
 import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
 import ImageCard from "../components/ImageCard";
 import { useState, useEffect, useRef } from "react";
@@ -18,7 +19,6 @@ export default function Camera() {
   const [addingCamera, setAddingCamera] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [selectedCameraJobId, setSelectedCameraJobId] = useState(null);
-  const videoRef = useRef(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -138,20 +138,6 @@ export default function Camera() {
     };
   }, []);
 
-  useEffect(() => {
-    try {
-      if (videoRef.current && selectedCameraJobId) {
-        const sel = cameras.find(c => String(c.job_id) === String(selectedCameraJobId)) || null;
-        if (sel && (sel.videoUrl || sel.frameSrc)) {
-          const p = videoRef.current.play();
-          if (p && typeof p.then === "function") {
-            p.catch(() => {});
-          }
-        }
-      }
-    } catch (e) {}
-  }, [selectedCameraJobId, cameras]);
-
   const formattedDate = currentTime.toLocaleDateString();
   const formattedTime = currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -167,7 +153,13 @@ export default function Camera() {
   };
 
   const handleRemoveCamera = (cameraJobId) => {
-    setCameras((prev) => prev.filter((c) => String(c.job_id) !== String(cameraJobId)));
+    setCameras((prev) => {
+      const removed = prev.find(c => String(c.job_id) === String(cameraJobId));
+      if (removed && removed.videoUrl && removed.videoUrl.startsWith && removed.videoUrl.startsWith("blob:")) {
+        try { URL.revokeObjectURL(removed.videoUrl); } catch (e) { /* ignore */ }
+      }
+      return prev.filter((c) => String(c.job_id) !== String(cameraJobId));
+    });
     if (selectedCameraJobId && String(selectedCameraJobId) === String(cameraJobId)) setSelectedCameraJobId(null);
   };
 
@@ -435,22 +427,43 @@ export default function Camera() {
             </div>
             <div className="w-full h-[60vh] bg-black rounded overflow-hidden flex items-center justify-center">
               {(() => {
-                const isStream = !!(selectedCamera?.meta && (selectedCamera.meta.is_stream === true || selectedCamera.meta.is_stream === "true"));
-                if (isStream && selectedCamera.frameSrc) {
+                const isUploadedVideo = selectedCamera?.videoUrl && (selectedCamera?.meta?.is_stream === false || selectedCamera?.meta?.is_stream === "false");
+                const hasAnnotatedFrame = !!selectedCamera?.frameSrc;
+
+                if (isUploadedVideo) {
+                  return (
+                    <video
+                      key={selectedCamera.videoUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      src={selectedCamera.videoUrl}
+                      className="object-contain w-full h-full"
+                    />
+                  );
+                }
+
+                if (hasAnnotatedFrame) {
                   return <img alt="annotated" src={selectedCamera.frameSrc} className="object-contain w-full h-full" />;
                 }
-                const videoSrc = selectedCamera.videoUrl || selectedCamera.frameSrc || null;
-                return (
-                  <video
-                    key={String(selectedCamera.job_id || selectedCamera.camera_id || "video")}
-                    ref={videoRef}
-                    controls
-                    src={videoSrc}
-                    className="object-contain w-full h-full"
-                  />
-                );
+
+                if (selectedCamera?.videoUrl) {
+                  return (
+                    <video
+                      key={selectedCamera.videoUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      src={selectedCamera.videoUrl}
+                      className="object-contain w-full h-full"
+                    />
+                  );
+                }
+
+                return <div className="text-gray-400">No media available</div>;
               })()}
             </div>
+
             <div className="mt-3 text-xs text-gray-300">
               <pre className="text-xs text-gray-400 max-h-32 overflow-auto">{JSON.stringify(selectedCamera.latest_people || [], null, 2)}</pre>
             </div>
