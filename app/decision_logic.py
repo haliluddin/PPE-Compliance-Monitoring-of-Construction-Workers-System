@@ -1,4 +1,3 @@
-# app/decision_logic.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -11,6 +10,7 @@ import cv2
 import re
 import time
 import numpy as np
+import threading
 from collections import defaultdict
 from tritonclient.http import InferInput, InferRequestedOutput
 from threading import Lock
@@ -19,6 +19,7 @@ PPE_CLASS_IDS = [0, 1, 2, 3]
 VIS_THRESH = 0.3
 CROP_PAD = 0.12
 
+IMPORPER_GLOVE_OVERLAP_THRESH = 0.45
 IMPROPER_GLOVE_OVERLAP_THRESH = 0.45
 IMPROPER_HELMET_HEAD_IOU_THRESH = 0.40
 HELMET_EYE_COVER_MARGIN = 5
@@ -26,9 +27,10 @@ HELMET_NOSE_DOWN_FACTOR = 0.30
 
 _mp_lock = Lock()
 _mp_pose = None
-_pose_instance = None
 _left_indices = None
 _right_indices = None
+
+_pose_local = threading.local()
 
 PPE_LABELS = {0: "GLOVE", 1: "HELMET", 2: "SHOE", 3: "VEST"}
 PPE_COLORS = {0: (200, 100, 200), 1: (10, 200, 200), 2: (180, 120, 40), 3: (240, 180, 30)}
@@ -57,19 +59,21 @@ def _init_mp_pose():
             return None
 
 def init_pose():
-    global _pose_instance
-    if _pose_instance is not None:
-        return _pose_instance
     mp = _init_mp_pose()
     if mp is None:
         return None
+    inst = getattr(_pose_local, "pose", None)
+    if inst is not None:
+        return inst
     try:
-        _pose_instance = mp.Pose(static_image_mode=False, model_complexity=0, smooth_landmarks=True, enable_segmentation=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
-        return _pose_instance
+        inst = mp.Pose(static_image_mode=False, model_complexity=0, smooth_landmarks=True, enable_segmentation=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        _pose_local.pose = inst
+        return inst
     except Exception:
         try:
-            _pose_instance = mp.Pose(static_image_mode=False, model_complexity=0, smooth_landmarks=True, enable_segmentation=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
-            return _pose_instance
+            inst = mp.Pose(static_image_mode=False, model_complexity=0, smooth_landmarks=True, enable_segmentation=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+            _pose_local.pose = inst
+            return inst
         except Exception:
             return None
 
@@ -346,7 +350,7 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
         elif reye_v is not None and reye_v >= VIS_THRESH:
             eye_y = reye_y
         if eye_y is not None:
-            if hb[1] <= eye_y + HELMET_EYE_COVER_MARGIN:
+            if hb[1] > eye_y + HELMET_EYE_COVER_MARGIN:
                 flags["improper_helmet"] = True
         if nose_v is not None and nose_v >= VIS_THRESH:
             if hb[3] > nose_y + (head_h * HELMET_NOSE_DOWN_FACTOR):

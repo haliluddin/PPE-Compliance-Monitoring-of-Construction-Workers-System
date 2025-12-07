@@ -1,4 +1,3 @@
-// frontend/src/pages/Camera.jsx
 import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
 import ImageCard from "../components/ImageCard";
 import { useState, useEffect, useRef } from "react";
@@ -71,10 +70,14 @@ export default function Camera() {
     try {
       const ws = new WebSocket(wsPath);
       wsRef.current = ws;
-      ws.onopen = () => {};
+      ws.onopen = () => {
+        console.log("[WS] connected to", wsPath);
+      };
       ws.onmessage = (ev) => {
+        console.log("[WS] message raw:", ev.data);
         try {
           const payload = JSON.parse(ev.data);
+          console.log("[WS] parsed payload:", payload);
           const meta = payload.meta || {};
           const jobId = meta.job_id ?? (meta.jobId ?? null);
           const annotated = payload.annotated_jpeg_b64 ?? payload.annotated_jpeg ?? null;
@@ -111,12 +114,16 @@ export default function Camera() {
             }
             return mapped;
           });
-        } catch (e) {}
+        } catch (e) {
+          console.error("[WS] parse error", e);
+        }
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
+        console.warn("[WS] closed", ev);
         wsRef.current = null;
       };
-      ws.onerror = () => {
+      ws.onerror = (err) => {
+        console.error("[WS] error", err);
         wsRef.current = null;
       };
     } catch (e) {
@@ -402,6 +409,7 @@ export default function Camera() {
           <div className="bg-[#111214] rounded-lg w-full max-w-4xl p-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-white font-semibold">{selectedCamera.title}</h3>
+              
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-300">{selectedCamera.status}</span>
                 <button className="text-gray-300 px-3 py-1 rounded bg-gray-800" onClick={() => setSelectedCameraJobId(null)}>Close</button>

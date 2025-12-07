@@ -5,7 +5,6 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_MAX_THREADS", "1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
-
 import base64 as _b64
 import base64
 import json
@@ -16,53 +15,46 @@ import logging
 from sqlalchemy import or_
 from datetime import datetime, timezone, timedelta
 from threading import Lock
-
+import threading
 from urllib.parse import urlparse
-
 from app.decision_logic import process_frame, init_pose
 from app.database import SessionLocal
 from app.models import Violation, Job, Worker, Notification
-
 try:
     from tritonclient.http import InferenceServerClient, InferInput, InferRequestedOutput
 except Exception:
     InferenceServerClient = None
-
 try:
     import redis
 except Exception:
     redis = None
-
 try:
     from .celery_app import celery
 except Exception:
     celery = None
-
 from app.tracker import get_global_tracker
-
 log = logging.getLogger(__name__)
-
 TRITON_URL = os.environ.get("TRITON_URL", "")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
 HUMAN_MODEL = os.environ.get("HUMAN_MODEL_NAME", "person_yolo")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 WS_CHANNEL = os.environ.get("WS_CHANNEL", "ppe_results")
 USE_LOCAL_YOLO = os.environ.get("USE_LOCAL_YOLO", "false").lower() in ("1", "true", "yes")
-FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
+FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "5"))
 LOCAL_PERSON_MODEL = os.environ.get("LOCAL_PERSON_MODEL", "/workspace/ppe-monitor/yolov8n.pt")
 LOCAL_PPE_MODEL = os.environ.get("LOCAL_PPE_MODEL", "/workspace/ppe-monitor/best.pt")
 YOLO_CONF = float(os.environ.get("YOLO_CONF", "0.35"))
 YOLO_IOU = float(os.environ.get("YOLO_IOU", "0.45"))
 OCR_GPU = os.environ.get("OCR_GPU", "false").lower() in ("1", "true", "yes")
-
 _TRITON_CLIENT = None
 _REDIS_CLIENT = None
 local_yolo = None
 _local_yolo_lock = Lock()
-
 _OCR_READER = None
 _OCR_LOCK = Lock()
-
+PH_TZ = timezone(timedelta(hours=8))
+_POSE_INSTANCE = None
+_POSE_LOCK = Lock()
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -71,7 +63,6 @@ def sanitize_triton_url(url: str) -> str:
         p = urlparse(url)
         return p.netloc or p.path
     return url
-
 def get_triton_client():
     global _TRITON_CLIENT
     if _TRITON_CLIENT is not None:
@@ -88,7 +79,6 @@ def get_triton_client():
     except Exception:
         _TRITON_CLIENT = None
     return _TRITON_CLIENT
-
 def get_redis():
     global _REDIS_CLIENT
     if _REDIS_CLIENT is not None:
@@ -101,7 +91,6 @@ def get_redis():
     except Exception:
         _REDIS_CLIENT = None
     return _REDIS_CLIENT
-
 def get_ocr_reader():
     global _OCR_READER
     with _OCR_LOCK:
@@ -122,7 +111,6 @@ def get_ocr_reader():
         except Exception:
             _OCR_READER = None
         return _OCR_READER
-
 def _init_local_yolo():
     global local_yolo
     with _local_yolo_lock:
@@ -223,7 +211,6 @@ def _init_local_yolo():
         except Exception:
             local_yolo = None
     return local_yolo
-
 def _parse_person_boxes_from_triton_outputs(outputs, H, W):
     if outputs is None:
         return []
@@ -287,7 +274,15 @@ def _parse_person_boxes_from_triton_outputs(outputs, H, W):
                 if cls == 0:
                     boxes.append((x1c, y1c, x2c, y2c, final_conf))
     return boxes
-
+def get_pose_instance():
+    global _POSE_INSTANCE
+    with _POSE_LOCK:
+        if _POSE_INSTANCE is None:
+            try:
+                _POSE_INSTANCE = init_pose()
+            except Exception:
+                _POSE_INSTANCE = None
+        return _POSE_INSTANCE
 def _process_image(image_bytes, meta=None):
     sess = None
     try:
@@ -299,11 +294,9 @@ def _process_image(image_bytes, meta=None):
         nparr = np.frombuffer(image_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         triton = get_triton_client()
-        pose = init_pose()
+        pose = get_pose_instance()
         person_boxes = None
         triton_out_for_ppe = None
-
-        # normalize frame timestamp (meta.get("ts")) into a timezone-aware UTC datetime
         meta = meta or {}
         raw_ts = meta.get("ts")
         frame_ts_dt = None
@@ -315,7 +308,6 @@ def _process_image(image_bytes, meta=None):
                 frame_ts_dt = datetime.now(timezone.utc)
         else:
             frame_ts_dt = None
-
         if triton is not None:
             try:
                 human_meta = triton.get_model_metadata(HUMAN_MODEL)
@@ -324,7 +316,7 @@ def _process_image(image_bytes, meta=None):
                 human_input_name = human_inputs[0]['name'] if human_inputs else None
                 human_output_names = [o['name'] for o in human_outputs] if human_outputs else []
                 if human_input_name and human_output_names:
-                    img_human = cv2.resize(frame, (416, 416))
+                    img_human = cv2.resize(frame, (320, 320))
                     img_human = cv2.cvtColor(img_human, cv2.COLOR_BGR2RGB).astype("float32")/255.0
                     img_human = np.transpose(img_human, (2, 0, 1))[None,...]
                     inp = InferInput(human_input_name, img_human.shape, "FP32")
@@ -347,7 +339,7 @@ def _process_image(image_bytes, meta=None):
             if ppe_meta_outputs:
                 try:
                     ppe_input_name = ppe_meta_inputs[0]['name'] if ppe_meta_inputs else None
-                    img_ppe = cv2.resize(frame, (416, 416))
+                    img_ppe = cv2.resize(frame, (320, 320))
                     img_ppe = cv2.cvtColor(img_ppe, cv2.COLOR_BGR2RGB).astype("float32")/255.0
                     img_ppe = np.transpose(img_ppe, (2,0,1))[None,...]
                     if ppe_input_name:
@@ -382,14 +374,13 @@ def _process_image(image_bytes, meta=None):
         job_id = meta.get("job_id")
         camera_id = meta.get("camera_id")
         frame_idx = meta.get("frame_idx")
-        # Use timezone-aware UTC for job timestamps
         sess = SessionLocal()
         job = None
         if job_id is not None:
             job = sess.query(Job).filter(Job.id == job_id).first()
             if job and getattr(job, "status", None) == "queued":
                 job.status = "running"
-                job.started_at = datetime.now(timezone.utc)  # timezone-aware
+                job.started_at = datetime.now(PH_TZ)
                 sess.commit()
         people = result.get("people", [])
         r = get_redis()
@@ -421,14 +412,21 @@ def _process_image(image_bytes, meta=None):
         annotated_bytes = None
         if annotated is not None:
             try:
-                should_publish_image = any((p.get("violations") or []) for p in people) or (meta.get("frame_idx", 0) % 10 == 0)
+                should_publish_image = any((p.get("violations") or []) for p in people)
                 if should_publish_image:
-                    _, jpgall = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                    h, w = annotated.shape[:2]
+                    target_w = 640
+                    if w > target_w:
+                        scale = target_w / float(w)
+                        annotated_small = cv2.resize(annotated, (int(w*scale), int(h*scale)))
+                    else:
+                        annotated_small = annotated
+                    _, jpgall = cv2.imencode('.jpg', annotated_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
                     annotated_b64 = base64.b64encode(jpgall.tobytes()).decode("ascii")
                     annotated_bytes = jpgall.tobytes()
                 else:
                     annotated_b64 = None
-                    _, jpgall = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                    _, jpgall = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
                     annotated_bytes = jpgall.tobytes()
             except Exception:
                 annotated_b64 = None
@@ -457,8 +455,7 @@ def _process_image(image_bytes, meta=None):
                 pass
         tracker = get_global_tracker()
         try:
-            # pass timezone-aware frame timestamp (UTC) to tracker
-            tracker.update_tracks(people, frame_idx or 0, frame_ts_dt if frame_ts_dt is not None else datetime.now(timezone.utc), annotated_bytes, sess, job_id=job_id, camera_id=camera_id, job_user_id=job.user_id if job is not None else None)
+            tracker.update_tracks(people, frame_idx or 0, frame_ts_dt if frame_ts_dt is not None else datetime.now(timezone.utc), annotated_bytes, sess, job_id=job_id, camera_id=camera_id, job_user_id=getattr(job, "user_id", None) if job is not None else None)
         except Exception:
             sess.rollback()
         return {"status": "ok", "meta": meta, "result_summary": {"people": len(people)}}
@@ -471,7 +468,6 @@ def _process_image(image_bytes, meta=None):
                 sess.close()
         except Exception:
             pass
-
 if celery:
     @celery.task(bind=True)
     def process_image_task(self, image_bytes, meta=None):
@@ -479,6 +475,5 @@ if celery:
 else:
     def process_image_task(*args, **kwargs):
         return _process_image(*args, **kwargs)
-
 def process_image(image_bytes, meta=None):
     return _process_image(image_bytes, meta)

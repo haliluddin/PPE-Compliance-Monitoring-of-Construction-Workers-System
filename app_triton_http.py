@@ -1,4 +1,3 @@
-# app_triton_http.py (updated - timezone-aware fixes)
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -11,6 +10,7 @@ import logging
 import asyncio
 import json
 import threading
+import queue
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body
@@ -92,18 +92,18 @@ ws_clients = set()
 APP_LOOP = None
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
+STREAM_QUEUES = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
-
-# Philippines timezone helper
 PH_TZ = timezone(timedelta(hours=8))
-
+from concurrent.futures import ThreadPoolExecutor
+PROCESS_EXECUTOR = ThreadPoolExecutor(max_workers=int(os.environ.get("PROCESS_WORKERS","3")))
+PROCESS_SEM = threading.BoundedSemaphore(int(os.environ.get("PROCESS_SEM","3")))
+try:
+    from app.router.auth import router as auth_router_dup
+except Exception:
+    pass
 def to_iso_ph(dt):
-    """
-    Convert a datetime to an ISO string in PH timezone (+08:00).
-    If dt is naive, assume UTC then convert.
-    If dt is None, return None.
-    """
     if dt is None:
         return None
     try:
@@ -115,7 +115,6 @@ def to_iso_ph(dt):
             return dt.isoformat()
         except Exception:
             return None
-
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -303,8 +302,53 @@ def create_job(payload: dict):
         return {"job_id": job.id, "status": job.status}
     finally:
         sess.close()
+def _submit_processing(img_bytes, meta):
+    def _run():
+        try:
+            process_image(img_bytes, meta)
+        finally:
+            try:
+                PROCESS_SEM.release()
+            except Exception:
+                pass
+    try:
+        PROCESS_EXECUTOR.submit(_run)
+    except Exception:
+        try:
+            PROCESS_SEM.release()
+        except Exception:
+            pass
 def process_video_file(job_id: int, filepath: str, camera_id=None):
     cap = cv2.VideoCapture(filepath)
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except Exception:
+        pass
+    q = queue.Queue(maxsize=2)
+    STREAM_QUEUES[job_id] = q
+    stop_event = threading.Event()
+    STREAM_EVENTS[job_id] = stop_event
+    def consumer():
+        while not stop_event.is_set():
+            try:
+                item = q.get(timeout=0.5)
+            except Exception:
+                continue
+            if item is None:
+                break
+            img_bytes, meta = item
+            acquired = PROCESS_SEM.acquire(blocking=False)
+            if not acquired:
+                continue
+            try:
+                _submit_processing(img_bytes, meta)
+            except Exception:
+                try:
+                    PROCESS_SEM.release()
+                except Exception:
+                    pass
+    consumer_thread = threading.Thread(target=consumer, daemon=True)
+    consumer_thread.start()
     frame_idx = 0
     sess = SessionLocal()
     job = None
@@ -312,50 +356,52 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
         job = sess.query(Job).filter(Job.id == job_id).first()
         if job:
             job.status = "running"
-            # store timezone-aware UTC
-            job.started_at = datetime.now(timezone.utc)
+            job.started_at = datetime.now(PH_TZ)
             sess.commit()
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
+                small_w = 640
+                h, w = frame.shape[:2]
+                if w > small_w:
+                    scale = small_w / float(w)
+                    frame_small = cv2.resize(frame, (int(w*scale), int(h*scale)))
+                else:
+                    frame_small = frame
                 try:
-                    _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
                     img_bytes = jpg.tobytes()
                 except Exception:
                     frame_idx += 1
                     continue
                 meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-                img_b64 = base64.b64encode(img_bytes).decode("ascii")
-                if USE_CELERY:
-                    try:
-                        process_image_task.delay(img_b64, meta)
-                        TASKS_QUEUED.inc()
-                    except Exception:
+                try:
+                    if q.full():
                         try:
-                            process_image(img_bytes, meta)
+                            q.get_nowait()
                         except Exception:
                             pass
-                else:
-                    try:
-                        process_image(img_bytes, meta)
-                    except Exception:
-                        try:
-                            process_image_task.delay(img_b64, meta)
-                            TASKS_QUEUED.inc()
-                        except Exception:
-                            pass
+                    q.put_nowait((img_bytes, meta))
+                except Exception:
+                    pass
             frame_idx += 1
+        stop_event.set()
+        try:
+            q.put_nowait(None)
+        except Exception:
+            pass
+        consumer_thread.join(timeout=1.0)
         if job:
             job.status = "completed"
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(PH_TZ)
             sess.commit()
     except Exception:
         try:
             if job:
                 job.status = "error"
-                job.finished_at = datetime.now(timezone.utc)
+                job.finished_at = datetime.now(PH_TZ)
                 sess.commit()
         except Exception:
             pass
@@ -364,6 +410,8 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             cap.release()
         except Exception:
             pass
+        STREAM_QUEUES.pop(job_id, None)
+        STREAM_EVENTS.pop(job_id, None)
         sess.close()
 @app.post("/jobs/{job_id}/upload")
 async def upload_job_video(job_id: int, file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
@@ -395,15 +443,46 @@ class StreamStart(BaseModel):
     job_id: int = None
 def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threading.Event = None):
     cap = cv2.VideoCapture(rtsp_url)
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except Exception:
+        pass
+    q = queue.Queue(maxsize=2)
+    STREAM_QUEUES[job_id] = q
+    if stop_event is None:
+        stop_event = threading.Event()
+        STREAM_EVENTS[job_id] = stop_event
     frame_idx = 0
     sess = SessionLocal()
+    job = None
+    def consumer():
+        while not stop_event.is_set():
+            try:
+                item = q.get(timeout=0.5)
+            except Exception:
+                continue
+            if item is None:
+                break
+            img_bytes, meta = item
+            acquired = PROCESS_SEM.acquire(blocking=False)
+            if not acquired:
+                continue
+            try:
+                _submit_processing(img_bytes, meta)
+            except Exception:
+                try:
+                    PROCESS_SEM.release()
+                except Exception:
+                    pass
+    consumer_thread = threading.Thread(target=consumer, daemon=True)
+    consumer_thread.start()
     try:
         job = None
         if job_id:
             job = sess.query(Job).filter(Job.id == job_id).first()
             if job:
                 job.status = "running"
-                job.started_at = datetime.now(timezone.utc)
+                job.started_at = datetime.now(PH_TZ)
                 sess.commit()
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -412,38 +491,48 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             if not ret:
                 time.sleep(0.05)
                 continue
-            _, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            img_bytes = jpg.tobytes()
-            meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-            img_b64 = base64.b64encode(img_bytes).decode("ascii")
-            if USE_CELERY:
+            if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
+                small_w = 640
+                h, w = frame.shape[:2]
+                if w > small_w:
+                    scale = small_w / float(w)
+                    frame_small = cv2.resize(frame, (int(w*scale), int(h*scale)))
+                else:
+                    frame_small = frame
                 try:
-                    process_image_task.delay(img_b64, meta)
-                    TASKS_QUEUED.inc()
+                    _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
+                    img_bytes = jpg.tobytes()
                 except Exception:
-                    try:
-                        process_image(img_bytes, meta)
-                    except Exception:
-                        pass
-            else:
+                    frame_idx += 1
+                    continue
+                meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
                 try:
-                    process_image(img_bytes, meta)
+                    if q.full():
+                        try:
+                            q.get_nowait()
+                        except Exception:
+                            pass
+                    q.put_nowait((img_bytes, meta))
                 except Exception:
-                    try:
-                        process_image_task.delay(img_b64, meta)
-                        TASKS_QUEUED.inc()
-                    except Exception:
-                        pass
+                    pass
             frame_idx += 1
+        stop_event.set()
+        try:
+            q.put_nowait(None)
+        except Exception:
+            pass
+        consumer_thread.join(timeout=1.0)
         if job:
             job.status = "completed"
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(PH_TZ)
             sess.commit()
     finally:
         try:
             cap.release()
         except Exception:
             pass
+        STREAM_QUEUES.pop(job_id, None)
+        STREAM_EVENTS.pop(job_id, None)
         sess.close()
 @app.post("/streams")
 def start_stream(payload: StreamStart):
@@ -477,12 +566,13 @@ def stop_stream(job_id: int):
         thread.join(timeout=2.0)
     STREAM_EVENTS.pop(job_id, None)
     STREAM_THREADS.pop(job_id, None)
+    STREAM_QUEUES.pop(job_id, None)
     sess = SessionLocal()
     try:
         job = sess.query(Job).filter(Job.id == job_id).first()
         if job:
             job.status = "stopped"
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(PH_TZ)
             sess.commit()
     finally:
         sess.close()
@@ -607,7 +697,6 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
                 "violation_types": r.violation_types,
                 "violation": r.violation_types,
                 "frame_index": r.frame_index,
-                # convert created_at to PH timezone string
                 "created_at": to_iso_ph(getattr(r, "created_at", None)),
                 "status": getattr(r, "status", "Pending"),
                 "camera": camera_name,
@@ -769,14 +858,12 @@ def create_camera(payload: dict = Body(...)):
 def quick_reports(period: str = "today"):
     sess = SessionLocal()
     try:
-        # use timezone-aware UTC reference
         now = datetime.now(timezone.utc)
         if period == "last_week":
             start = now - timedelta(days=7)
         elif period == "last_month":
             start = now - timedelta(days=30)
         else:
-            # start of local day in UTC-aware object; keep same day boundary as before
             start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
         rows = sess.query(Violation).filter(Violation.created_at >= start).all()
         total_incidents = len(rows)
