@@ -1,4 +1,3 @@
-# app/router/violations.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -71,6 +70,7 @@ def get_violations(db: Session = Depends(get_db), current_user: User = Depends(g
 
 @router.post("/")
 def create_violation(violation: ViolationCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Parse frame timestamp (store as UTC if possible)
     frame_ts_val = None
     if violation.frame_ts:
         try:
@@ -86,9 +86,14 @@ def create_violation(violation: ViolationCreate, db: Session = Depends(get_db), 
             frame_ts_val = None
     if frame_ts_val:
         if frame_ts_val.tzinfo is None:
+            # assume it's UTC if no tzinfo
             frame_ts_val = frame_ts_val.replace(tzinfo=timezone.utc)
-        frame_ts_val = frame_ts_val.astimezone(PH_TZ)
-    now_ph = datetime.now(PH_TZ)
+        # normalize to UTC
+        frame_ts_val = frame_ts_val.astimezone(timezone.utc)
+
+    # Use UTC for created_at (store canonical server time)
+    now_utc = datetime.now(timezone.utc)
+
     new_violation = Violation(
         violation_types=violation.violation_types,
         worker_id=violation.worker_id,
@@ -97,22 +102,24 @@ def create_violation(violation: ViolationCreate, db: Session = Depends(get_db), 
         camera_id=violation.camera_id,
         user_id=current_user.id,
         status="pending",
-        created_at=now_ph,
+        created_at=now_utc,
     )
     db.add(new_violation)
     db.commit()
     db.refresh(new_violation)
+
     message = f"New violation: {new_violation.violation_types} by worker code {new_violation.worker_code}"
     new_notification = Notification(
         message=message,
         user_id=current_user.id,
         violation_id=new_violation.id,
         is_read=False,
-        created_at=now_ph
+        created_at=now_utc
     )
     db.add(new_notification)
     db.commit()
     db.refresh(new_notification)
+
     worker = db.query(Worker).filter(Worker.id == new_violation.worker_id).first()
     cam = db.query(Camera).filter(Camera.id == new_violation.camera_id).first()
     if cam:
@@ -123,6 +130,7 @@ def create_violation(violation: ViolationCreate, db: Session = Depends(get_db), 
         camera_display = "Video Upload (Video Upload)"
         camera_name = None
         camera_location = None
+
     notification_data = {
         "type": "new_violation",
         "id": new_notification.id,
@@ -155,21 +163,32 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
     new_status = payload.get("status")
     if new_status not in ["pending", "resolved", "false positive"]:
         raise HTTPException(status_code=400, detail="Invalid status")
+
+    # Update status and resolved_at accordingly (store resolved_at in UTC)
     violation.status = new_status
+    now_utc = datetime.now(timezone.utc)
+    if new_status.lower() == "resolved":
+        violation.resolved_at = now_utc
+    else:
+        # clear resolved_at if status changed back to pending/false positive
+        violation.resolved_at = None
+
     db.commit()
     db.refresh(violation)
-    now_ph = datetime.now(PH_TZ)
+
+    # create notification for status update
     status_message = f"Violation #{violation.id} status updated to {new_status}"
     status_notification = Notification(
         message=status_message,
         user_id=violation.user_id or current_user.id,
         violation_id=violation.id,
         is_read=False,
-        created_at=now_ph
+        created_at=now_utc
     )
     db.add(status_notification)
     db.commit()
     db.refresh(status_notification)
+
     cam = db.query(Camera).filter(Camera.id == violation.camera_id).first()
     if cam:
         camera_display = f"{cam.name} ({cam.location})" if cam.name and cam.location else (cam.name or cam.location)
@@ -179,6 +198,7 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
         camera_display = "Video Upload (Video Upload)"
         camera_name = None
         camera_location = None
+
     notification_data = {
         "type": "status_update",
         "violation_id": violation.id,

@@ -27,10 +27,8 @@ def _period_bounds(period: str):
         start_ph = today_start_ph
         end_ph = start_ph + timedelta(days=1)
         days = 1
-
-    # Convert to UTC and then drop tzinfo to match typical DB-stored naive UTC datetimes
-    start_utc = start_ph.astimezone(timezone.utc).replace(tzinfo=None)
-    end_utc = end_ph.astimezone(timezone.utc).replace(tzinfo=None)
+    start_utc = start_ph.astimezone(timezone.utc)
+    end_utc = end_ph.astimezone(timezone.utc)
     return start_ph, start_utc, end_utc, days
 
 def _to_iso_ph(dt):
@@ -242,6 +240,7 @@ def export_reports(
         Violation.id,
         Violation.violation_types,
         Violation.created_at,
+        Violation.resolved_at,
         Worker.fullName.label("worker_name"),
         Camera.name.label("camera_location")
     ).outerjoin(Worker, Worker.id == Violation.worker_id)\
@@ -252,9 +251,9 @@ def export_reports(
 
     csv_file = StringIO()
     writer = csv.writer(csv_file)
-    writer.writerow(["ID", "Violation Type", "Date", "Worker Name", "Camera Location"])
+    writer.writerow(["ID", "Violation Type", "Date", "Worker Name", "Camera Location", "Resolved At"])
     for v in violations:
-        writer.writerow([v.id, v.violation_types, _to_iso_ph(v.created_at), v.worker_name or "", v.camera_location or ""])
+        writer.writerow([v.id, v.violation_types, _to_iso_ph(v.created_at), v.worker_name or "", v.camera_location or "", _to_iso_ph(getattr(v, "resolved_at", None))])
 
     csv_file.seek(0)
     date_str = start_ph.strftime("%Y%m%d")

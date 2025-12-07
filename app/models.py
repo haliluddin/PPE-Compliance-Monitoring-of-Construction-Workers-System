@@ -1,4 +1,3 @@
-# app/models.py
 from sqlalchemy import Column, Integer, String, Date, Text, DateTime, JSON, LargeBinary, Boolean, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -70,6 +69,7 @@ class Violation(Base):
     inference = Column(JSON)
     status = Column(String, nullable=False, server_default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)   # <-- NEW column
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     worker = relationship("Worker", back_populates="violations")
     user = relationship("User", back_populates="violations")
