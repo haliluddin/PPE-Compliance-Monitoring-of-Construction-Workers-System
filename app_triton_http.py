@@ -36,7 +36,6 @@ except Exception:
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
-from sqlalchemy import cast, Date
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
 app.add_middleware(
@@ -195,7 +194,10 @@ def startup_event():
         redis_sync = None
         redis_pubsub = None
     APP_LOOP = asyncio.get_event_loop()
-    asyncio.create_task(redis_subscriber_task())
+    try:
+        asyncio.create_task(redis_subscriber_task())
+    except Exception:
+        pass
 @app.on_event("shutdown")
 def shutdown_event():
     global triton, redis_pubsub
@@ -717,28 +719,11 @@ def update_violation_status(violation_id: int, payload: dict = Body(...)):
         new_status = payload.get("status")
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
-        new_status = str(new_status).strip()
         try:
             v.status = new_status
-            if new_status.strip().lower() == "resolved":
-                now_utc = datetime.now(timezone.utc)
-                if hasattr(v, "resolved_at"):
-                    try:
-                        if not getattr(v, "resolved_at", None):
-                            v.resolved_at = now_utc
-                    except Exception:
-                        pass
+            if new_status.lower() == "resolved":
                 try:
-                    created_at = getattr(v, "created_at", None)
-                    if created_at:
-                        if created_at.tzinfo is None:
-                            created_at = created_at.replace(tzinfo=timezone.utc)
-                        minutes = (now_utc - created_at).total_seconds() / 60.0
-                        if hasattr(v, "response_time"):
-                            try:
-                                v.response_time = round(minutes, 2)
-                            except Exception:
-                                pass
+                    v.resolved_at = datetime.now(timezone.utc)
                 except Exception:
                     pass
             sess.commit()
@@ -877,25 +862,35 @@ def create_camera(payload: dict = Body(...)):
         return {"camera_id": getattr(cam, "id", None), "id": getattr(cam, "id", None), "name": getattr(cam, "name", None), "location": getattr(cam, "location", None)}
     finally:
         sess.close()
+def _period_bounds(period: str):
+    now_ph = datetime.now(PH_TZ)
+    today_start_ph = now_ph.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "last_week":
+        end_ph = today_start_ph
+        start_ph = end_ph - timedelta(days=7)
+        days = 7
+    elif period == "last_month":
+        end_ph = today_start_ph
+        start_ph = end_ph - timedelta(days=30)
+        days = 30
+    else:
+        start_ph = today_start_ph
+        end_ph = start_ph + timedelta(days=1)
+        days = 1
+    start_utc = start_ph.astimezone(timezone.utc)
+    end_utc = end_ph.astimezone(timezone.utc)
+    return start_ph, start_utc, end_utc, days
 @app.get("/reports")
 def quick_reports(period: str = "today"):
     sess = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
-        if period == "last_week":
-            start = now - timedelta(days=7)
-        elif period == "last_month":
-            start = now - timedelta(days=30)
-        else:
-            start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-        start_date_local = start.astimezone(PH_TZ).date()
-        rows = sess.query(Violation).filter(cast(Violation.created_at, Date) >= start_date_local).all()
+        start_ph, start_utc, end_utc, days = _period_bounds(period)
+        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
         total_incidents = len(rows)
         counts = {}
-        resolved_by_worker = {}
         camera_counts = {}
         type_counts = {}
-        resolved_total = 0
+        resolved = 0
         for v in rows:
             worker_display = None
             try:
@@ -904,7 +899,7 @@ def quick_reports(period: str = "today"):
             except Exception:
                 worker_display = None
             if not worker_display:
-                worker_display = getattr(v, "worker", None) or getattr(v, "worker_name", None) or getattr(v, "worker_code", "UNKNOWN")
+                worker_display = getattr(v, "worker_name", None) or getattr(v, "worker", None) or getattr(v, "worker_code", "UNKNOWN")
             counts[worker_display] = counts.get(worker_display, 0) + 1
             cam = getattr(v, "camera", None)
             if cam:
@@ -922,19 +917,17 @@ def quick_reports(period: str = "today"):
                     type_counts[str(vt)] = type_counts.get(str(vt), 0) + 1
             else:
                 type_counts["Unknown"] = type_counts.get("Unknown", 0) + 1
-            status = (getattr(v, "status", "") or "").strip().lower()
-            if status == "resolved":
-                resolved_total += 1
-                resolved_by_worker[worker_display] = resolved_by_worker.get(worker_display, 0) + 1
+            if getattr(v, "status", "").lower() == "resolved":
+                resolved += 1
         top_offenders = [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
         camera_data = [{"location": k, "violations": v, "risk": "High" if v > 5 else "Medium" if v > 2 else "Low"} for k, v in camera_counts.items()]
         most_violations = [{"name": k, "violations": v} for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)]
         worker_data = []
         for i, (k, v) in enumerate(sorted(counts.items(), key=lambda x: x[1], reverse=True)):
-            resolved_count = resolved_by_worker.get(k, 0)
-            resolution_rate = round((resolved_count / v) * 100, 2) if v > 0 else 0
-            worker_data.append({"rank": i + 1, "name": k, "violations": v, "resolved": resolved_count, "resolution_rate": resolution_rate})
-        violation_resolution_rate = round((resolved_total / total_incidents * 100) if total_incidents > 0 else 0, 2)
+            resolved_for_worker = 0
+            resolution_rate = 0
+            worker_data.append({"rank": i+1, "name": k, "violations": v, "resolved": resolved_for_worker, "resolution_rate": resolution_rate})
+        violation_resolution_rate = round((resolved / total_incidents * 100) if total_incidents > 0 else 0, 2)
         return {
             "total_incidents": total_incidents,
             "total_workers_involved": len(counts),
@@ -951,48 +944,44 @@ def quick_reports(period: str = "today"):
 def reports_performance(period: str = "today"):
     sess = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
-        if period == "last_week":
-            start = now - timedelta(days=7)
-            days = 7
-        elif period == "last_month":
-            start = now - timedelta(days=30)
-            days = 30
-        else:
-            start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-            days = 1
-        start_date_local = start.astimezone(PH_TZ).date()
-        rows = sess.query(Violation).filter(cast(Violation.created_at, Date) >= start_date_local).all()
+        start_ph, start_utc, end_utc, days = _period_bounds(period)
+        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
         date_buckets = {}
+        for i in range(days):
+            d = (start_ph + timedelta(days=i)).strftime("%Y-%m-%d")
+            date_buckets[d] = {"violations": 0, "compliance": 0}
         response_times = []
         for v in rows:
             dt = getattr(v, "created_at", None)
             if not dt:
                 continue
-            try:
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-            except Exception:
-                pass
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
             date_key = dt.astimezone(PH_TZ).strftime("%Y-%m-%d")
-            date_buckets.setdefault(date_key, {"violations": 0, "compliance": 0})
+            if date_key not in date_buckets:
+                date_buckets[date_key] = {"violations": 0, "compliance": 0}
             date_buckets[date_key]["violations"] += 1
-            if getattr(v, "status", "").strip().lower() == "resolved":
+            if getattr(v, "status", "").lower() == "resolved":
                 date_buckets[date_key]["compliance"] += 1
             rt = getattr(v, "response_time", None)
-            if rt is None:
-                resolved_at = getattr(v, "resolved_at", None) or getattr(v, "finished_at", None)
-                if resolved_at and dt:
-                    try:
-                        if resolved_at.tzinfo is None:
-                            resolved_at = resolved_at.replace(tzinfo=timezone.utc)
-                        rt = (resolved_at - dt).total_seconds() / 60.0
-                    except Exception:
-                        rt = None
             if isinstance(rt, (int, float)):
                 response_times.append(float(rt))
+            else:
+                resolved_at = getattr(v, "resolved_at", None)
+                created_at = getattr(v, "created_at", None)
+                try:
+                    if resolved_at is not None and created_at is not None:
+                        if resolved_at.tzinfo is None:
+                            resolved_at = resolved_at.replace(tzinfo=timezone.utc)
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=timezone.utc)
+                        delta_min = (resolved_at - created_at).total_seconds() / 60.0
+                        if delta_min >= 0:
+                            response_times.append(delta_min)
+                except Exception:
+                    pass
         performance_over_time = [{"date": k, "violations": v["violations"], "compliance": v["compliance"]} for k, v in sorted(date_buckets.items())]
-        average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0.0
+        average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0
         return {"performance_over_time": performance_over_time, "average_response_time": average_response_time}
     finally:
         sess.close()
@@ -1000,15 +989,8 @@ def reports_performance(period: str = "today"):
 def reports_export(period: str = "today"):
     sess = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
-        if period == "last_week":
-            start = now - timedelta(days=7)
-        elif period == "last_month":
-            start = now - timedelta(days=30)
-        else:
-            start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-        start_date_local = start.astimezone(PH_TZ).date()
-        rows = sess.query(Violation).filter(cast(Violation.created_at, Date) >= start_date_local).all()
+        start_ph, start_utc, end_utc, days = _period_bounds(period)
+        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
         si = io.StringIO()
         cw = csv.writer(si)
         cw.writerow(["id", "worker_code", "worker_name", "violation_types", "camera", "camera_location", "created_at", "status"])
