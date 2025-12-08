@@ -381,7 +381,7 @@ def _process_image(image_bytes, meta=None):
             job = sess.query(Job).filter(Job.id == job_id).first()
             if job and getattr(job, "status", None) == "queued":
                 job.status = "running"
-                job.started_at = datetime.now(PH_TZ)
+                job.started_at = datetime.now(timezone.utc)
                 sess.commit()
         people = result.get("people", [])
         r = get_redis()

@@ -175,7 +175,10 @@ export default function Camera() {
     };
     const res = await fetch(`${API_BASE}/jobs`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}` 
+      },
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error("Failed to create job");

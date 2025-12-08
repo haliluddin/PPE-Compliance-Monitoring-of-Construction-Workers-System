@@ -18,6 +18,8 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSock
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi import Depends
+from app.router.auth import get_current_user
 import numpy as np
 import cv2
 import io
@@ -274,13 +276,15 @@ async def redis_subscriber_task():
             await asyncio.sleep(0.1)
         await asyncio.sleep(0.01)
 @app.post("/jobs")
-def create_job(payload: dict):
+def create_job(payload: dict, current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
         job_type = payload.get("job_type", "video")
         camera_id = payload.get("camera_id")
-        meta = payload.get("meta", {})
-        job = Job(job_type=job_type, camera_id=camera_id, status="queued", meta=meta)
+        meta = payload.get("meta", {}) or {}
+        # set user_id to the authenticated user's id
+        user_id = getattr(current_user, "id", None)
+        job = Job(job_type=job_type, camera_id=camera_id, status="queued", meta=meta, user_id=user_id)
         sess.add(job)
         sess.commit()
         sess.refresh(job)
@@ -520,14 +524,15 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
         STREAM_EVENTS.pop(job_id, None)
         sess.close()
 @app.post("/streams")
-def start_stream(payload: StreamStart):
+def start_stream(payload: StreamStart, current_user=Depends(get_current_user)):
     rtsp_url = payload.stream_url
     camera_id = payload.camera_id
     job_id = payload.job_id
     if job_id is None:
         sess = SessionLocal()
         try:
-            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url})
+            # record user_id on the created job
+            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url}, user_id=getattr(current_user, "id", None))
             sess.add(job)
             sess.commit()
             sess.refresh(job)
