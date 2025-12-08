@@ -315,7 +315,8 @@ export default function Camera() {
 
   const nonExpandableStatuses = ["PROCESSING", "UPLOADING", "IDLE", "STARTED", "UPLOAD_FAILED", "STOPPED"];
 
-  const selectedCamera = cameras.find(c => String(c.job_id) === String(selectedCameraJobId)) || null;
+  const selectedCameraIndex = cameras.findIndex(c => String(c.job_id) === String(selectedCameraJobId));
+  const selectedCamera = selectedCameraIndex >= 0 ? cameras[selectedCameraIndex] : null;
 
   return (
     <div className="p-8 text-gray-100 bg-[#1E1F23] min-h-screen">
@@ -440,34 +441,47 @@ export default function Camera() {
             </div>
             <div className="w-full h-[60vh] bg-black rounded overflow-hidden flex items-center justify-center">
               {(() => {
-                const isUploadedVideo = selectedCamera?.videoUrl && (selectedCamera?.meta?.is_stream === false || selectedCamera?.meta?.is_stream === "false");
-                const hasAnnotatedFrame = !!selectedCamera?.frameSrc;
+                const cam = selectedCamera;
+                if (!cam) return <div className="text-gray-400">No media available</div>;
 
-                if (isUploadedVideo) {
+                const isUploadedVideo = cam.videoUrl && (cam.meta?.is_stream === false || cam.meta?.is_stream === "false");
+                const annotatedFrame = cam.frameSrc || cam.latestAnnotatedThumb || null;
+
+                if (isUploadedVideo && !annotatedFrame) {
+                  // uploaded video (use video element and force reload when videoUrl changes)
                   return (
                     <video
-                      key={selectedCamera.videoUrl}
+                      key={String(cam.videoUrl) + "_video"}
                       controls
                       playsInline
                       preload="metadata"
-                      src={selectedCamera.videoUrl}
+                      src={cam.videoUrl}
                       className="object-contain w-full h-full"
                     />
                   );
                 }
 
-                if (hasAnnotatedFrame) {
-                  return <img alt="annotated" src={selectedCamera.frameSrc} className="object-contain w-full h-full" />;
+                if (annotatedFrame) {
+                  // annotated frame (image) — key ensures it updates immediately when base64 changes
+                  return (
+                    <img
+                      key={String(annotatedFrame).slice(0,50)} // short key derived from src so updates reload
+                      alt="annotated"
+                      src={annotatedFrame}
+                      className="object-contain w-full h-full"
+                    />
+                  );
                 }
 
-                if (selectedCamera?.videoUrl) {
+                if (cam.videoUrl) {
+                  // fallback video
                   return (
                     <video
-                      key={selectedCamera.videoUrl}
+                      key={String(cam.videoUrl) + "_video2"}
                       controls
                       playsInline
                       preload="metadata"
-                      src={selectedCamera.videoUrl}
+                      src={cam.videoUrl}
                       className="object-contain w-full h-full"
                     />
                   );

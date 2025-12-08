@@ -9,6 +9,7 @@ os.environ.setdefault("MEDIAPIPE_DISABLE_GPU","1")
 import time
 import logging
 import asyncio
+import aiofiles
 import json
 import threading
 import queue
@@ -420,6 +421,7 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
         STREAM_QUEUES.pop(job_id, None)
         STREAM_EVENTS.pop(job_id, None)
         sess.close()
+
 @app.post("/jobs/{job_id}/upload")
 async def upload_job_video(job_id: int, file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     INFER_REQUESTS.inc()
@@ -435,14 +437,15 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
     filename = f"job_{job_id}_{int(time.time())}_{file.filename}"
     filepath = os.path.join(tmp_upload_dir, filename)
 
+    # Use aiofiles to stream asynchronously to disk
     try:
-        with open(filepath, "wb") as out_f:
-            chunk_size = 1024 * 1024  # 1 MB
+        async with aiofiles.open(filepath, "wb") as out_f:
+            chunk_size = 1024 * 1024  # 1MB
             while True:
                 chunk = await file.read(chunk_size)
                 if not chunk:
                     break
-                out_f.write(chunk)
+                await out_f.write(chunk)
     except Exception as e:
         try:
             os.remove(filepath)
@@ -450,16 +453,17 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
             pass
         raise HTTPException(status_code=500, detail=f"failed to save upload: {str(e)}")
 
+    # schedule processing in background (returns immediately)
+    TASKS_QUEUED.inc()
     if background_tasks is not None:
         background_tasks.add_task(process_video_file, job_id, filepath, camera_id)
-        TASKS_QUEUED.inc()
-        return {"status": "accepted", "job_id": job_id}
     else:
         thread = threading.Thread(target=process_video_file, args=(job_id, filepath, camera_id), daemon=True)
         STREAM_THREADS[job_id] = thread
         thread.start()
-        TASKS_QUEUED.inc()
-        return {"status": "accepted", "job_id": job_id}
+
+    return {"status": "accepted", "job_id": job_id}
+
 class StreamStart(BaseModel):
     stream_url: str
     camera_id: int = None
