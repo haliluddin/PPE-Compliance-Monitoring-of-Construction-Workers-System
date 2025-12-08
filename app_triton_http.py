@@ -244,6 +244,25 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
+@app.websocket("/ws/notifications")
+async def websocket_notifications(ws: WebSocket):
+    await ws.accept()
+    ws_clients.add(ws)
+    try:
+        while True:
+            try:
+                await ws.receive_text()
+            except Exception:
+                break
+            try:
+                await ws.send_text("ack")
+            except Exception:
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ws in ws_clients:
+            ws_clients.remove(ws)
 async def redis_subscriber_task():
     global redis_pubsub
     if redis_pubsub is None:
@@ -282,7 +301,6 @@ def create_job(payload: dict, current_user=Depends(get_current_user)):
         job_type = payload.get("job_type", "video")
         camera_id = payload.get("camera_id")
         meta = payload.get("meta", {}) or {}
-        # set user_id to the authenticated user's id
         user_id = getattr(current_user, "id", None)
         job = Job(job_type=job_type, camera_id=camera_id, status="queued", meta=meta, user_id=user_id)
         sess.add(job)
@@ -531,7 +549,6 @@ def start_stream(payload: StreamStart, current_user=Depends(get_current_user)):
     if job_id is None:
         sess = SessionLocal()
         try:
-            # record user_id on the created job
             job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url}, user_id=getattr(current_user, "id", None))
             sess.add(job)
             sess.commit()
@@ -696,12 +713,122 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
         return out
     finally:
         sess.close()
+@app.put("/violations/{violation_id}/status")
+def update_violation_status(violation_id: int, payload: dict = Body(...)):
+    sess = SessionLocal()
+    try:
+        v = sess.query(Violation).filter(Violation.id == violation_id).first()
+        if not v:
+            raise HTTPException(status_code=404, detail="violation not found")
+        new_status = payload.get("status")
+        if new_status is None:
+            raise HTTPException(status_code=400, detail="status required")
+        try:
+            v.status = new_status
+            if new_status.lower() == "resolved":
+                try:
+                    v.resolved_at = datetime.now(timezone.utc)
+                except Exception:
+                    pass
+            sess.commit()
+            sess.refresh(v)
+        except Exception:
+            sess.rollback()
+            raise
+        notif_payload = {"type": "status_update", "violation_id": v.id, "status": v.status, "created_at": to_iso_ph(datetime.now(timezone.utc))}
+        try:
+            if redis_sync is not None:
+                try:
+                    redis_sync.publish(WS_CHANNEL, json.dumps(notif_payload, default=str))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            loop = APP_LOOP
+            if loop:
+                for ws in list(ws_clients):
+                    try:
+                        asyncio.run_coroutine_threadsafe(ws.send_json(notif_payload), loop)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return {"id": v.id, "status": v.status}
+    finally:
+        sess.close()
 @app.get("/health")
 def health():
     if os.environ.get("ALLOW_NO_TRITON","1") in ("1","true","True"):
         return {"triton_ready": True, "note": "Triton not present; local processing allowed"}
     ready = triton is not None
     return {"triton_ready": ready}
+@app.get("/notifications")
+def get_notifications(limit: int = 100, offset: int = 0):
+    sess = SessionLocal()
+    try:
+        rows = sess.query(Violation).order_by(Violation.id.desc()).offset(offset).limit(limit).all()
+        out = []
+        for r in rows:
+            worker_name = None
+            try:
+                if getattr(r, "worker", None):
+                    worker_obj = r.worker
+                    worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+            except Exception:
+                worker_name = None
+            if not worker_name:
+                worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
+            camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            try:
+                cam = getattr(r, "camera", None)
+                if cam:
+                    camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                    camera_location = getattr(cam, "location", "") or camera_name
+            except Exception:
+                pass
+            snapshot_b64 = None
+            try:
+                snap = getattr(r, "snapshot", None)
+                if snap:
+                    if isinstance(snap, (bytes, bytearray)):
+                        snapshot_b64 = base64.b64encode(snap).decode("ascii")
+                    elif isinstance(snap, str):
+                        snapshot_b64 = snap
+            except Exception:
+                snapshot_b64 = None
+            out.append({
+                "id": r.id,
+                "violation_id": r.id,
+                "worker_name": worker_name,
+                "worker_code": getattr(r, "worker_code", None) or "N/A",
+                "violation_type": getattr(r, "violation_types", None) or "Unknown Violation",
+                "violation": getattr(r, "violation_types", None) or "Unknown Violation",
+                "camera": camera_name,
+                "camera_location": camera_location,
+                "created_at": to_iso_ph(getattr(r, "created_at", None)),
+                "is_read": getattr(r, "is_read", False),
+                "status": getattr(r, "status", "Pending"),
+                "type": "worker_violation",
+                "snapshot": snapshot_b64
+            })
+        return out
+    finally:
+        sess.close()
+@app.post("/notifications/{notif_id}/mark_read")
+def mark_notification_read(notif_id: int):
+    sess = SessionLocal()
+    try:
+        v = sess.query(Violation).filter(Violation.id == notif_id).first()
+        if not v:
+            raise HTTPException(status_code=404, detail="notification not found")
+        if hasattr(v, "is_read"):
+            v.is_read = True
+            sess.commit()
+        return {"ok": True}
+    finally:
+        sess.close()
 @app.get("/cameras")
 def list_cameras():
     sess = SessionLocal()
@@ -739,4 +866,171 @@ def create_camera(payload: dict = Body(...)):
         return {"camera_id": getattr(cam, "id", None), "id": getattr(cam, "id", None), "name": getattr(cam, "name", None), "location": getattr(cam, "location", None)}
     finally:
         sess.close()
+def _period_bounds(period: str):
+    now_ph = datetime.now(PH_TZ)
+    today_start_ph = now_ph.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "last_week":
+        end_ph = today_start_ph
+        start_ph = end_ph - timedelta(days=7)
+        days = 7
+    elif period == "last_month":
+        end_ph = today_start_ph
+        start_ph = end_ph - timedelta(days=30)
+        days = 30
+    else:
+        start_ph = today_start_ph
+        end_ph = start_ph + timedelta(days=1)
+        days = 1
 
+    start_utc = start_ph.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_ph.astimezone(timezone.utc).replace(tzinfo=None)
+    return start_ph, start_utc, end_utc, days
+@app.get("/reports")
+def quick_reports(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        start_ph, start_utc, end_utc, days = _period_bounds(period)
+        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
+        total_incidents = len(rows)
+        counts = {}
+        camera_counts = {}
+        type_counts = {}
+        resolved = 0
+        for v in rows:
+            worker_display = None
+            try:
+                if getattr(v, "worker", None):
+                    worker_display = getattr(v.worker, "fullName", None) or getattr(v.worker, "name", None)
+            except Exception:
+                worker_display = None
+            if not worker_display:
+                worker_display = getattr(v, "worker_name", None) or getattr(v, "worker", None) or getattr(v, "worker_code", "UNKNOWN")
+            counts[worker_display] = counts.get(worker_display, 0) + 1
+            cam = getattr(v, "camera", None)
+            if cam:
+                cam_key = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+            else:
+                cam_key = "Video Upload" if getattr(v, "camera_id", None) is None else "Unknown"
+            camera_counts[cam_key] = camera_counts.get(cam_key, 0) + 1
+            vt = getattr(v, "violation_types", None) or ""
+            if vt:
+                try:
+                    parts = [p.strip() for p in str(vt).split(",") if p.strip()]
+                    for p in parts:
+                        type_counts[p] = type_counts.get(p, 0) + 1
+                except Exception:
+                    type_counts[str(vt)] = type_counts.get(str(vt), 0) + 1
+            else:
+                type_counts["Unknown"] = type_counts.get("Unknown", 0) + 1
+            if getattr(v, "status", "").lower() == "resolved":
+                resolved += 1
+        top_offenders = [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
+        camera_data = [{"location": k, "violations": v, "risk": "High" if v > 5 else "Medium" if v > 2 else "Low"} for k, v in camera_counts.items()]
+        most_violations = [{"name": k, "violations": v} for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)]
+        worker_data = []
+        for i, (k, v) in enumerate(sorted(counts.items(), key=lambda x: x[1], reverse=True)):
+            resolved_for_worker = 0
+            resolution_rate = 0
+            worker_data.append({"rank": i+1, "name": k, "violations": v, "resolved": resolved_for_worker, "resolution_rate": resolution_rate})
+        violation_resolution_rate = round((resolved / total_incidents * 100) if total_incidents > 0 else 0, 2)
+        return {
+            "total_incidents": total_incidents,
+            "total_workers_involved": len(counts),
+            "violation_resolution_rate": violation_resolution_rate,
+            "high_risk_locations": sum(1 for d in camera_data if d["risk"] == "High"),
+            "most_violations": most_violations,
+            "top_offenders": top_offenders,
+            "camera_data": camera_data,
+            "worker_data": worker_data
+        }
+    finally:
+        sess.close()
+@app.get("/reports/performance")
+def reports_performance(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        start_ph, start_utc, end_utc, days = _period_bounds(period)
+        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
+        date_buckets = {}
+        for i in range(days):
+            d = (start_ph + timedelta(days=i)).strftime("%Y-%m-%d")
+            date_buckets[d] = {"violations": 0, "compliance": 0}
+        response_times = []
+        for v in rows:
+            dt = getattr(v, "created_at", None)
+            if not dt:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            date_key = dt.astimezone(PH_TZ).strftime("%Y-%m-%d")
+            if date_key not in date_buckets:
+                date_buckets[date_key] = {"violations": 0, "compliance": 0}
+            date_buckets[date_key]["violations"] += 1
+            if getattr(v, "status", "").lower() == "resolved":
+                date_buckets[date_key]["compliance"] += 1
+            rt = getattr(v, "response_time", None)
+            if isinstance(rt, (int, float)):
+                response_times.append(float(rt))
+            else:
+                resolved_at = getattr(v, "resolved_at", None)
+                created_at = getattr(v, "created_at", None)
+                try:
+                    if resolved_at is not None and created_at is not None:
+                        if resolved_at.tzinfo is None:
+                            resolved_at = resolved_at.replace(tzinfo=timezone.utc)
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=timezone.utc)
+                        delta_min = (resolved_at - created_at).total_seconds() / 60.0
+                        if delta_min >= 0:
+                            response_times.append(delta_min)
+                except Exception:
+                    pass
+        performance_over_time = [{"date": k, "violations": v["violations"], "compliance": v["compliance"]} for k, v in sorted(date_buckets.items())]
+        average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0
+        return {"performance_over_time": performance_over_time, "average_response_time": average_response_time}
+    finally:
+        sess.close()
+@app.get("/reports/export")
+def reports_export(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        start_ph, start_utc, end_utc, days = _period_bounds(period)
+        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
+        si = io.StringIO()
+        cw = csv.writer(si)
+        cw.writerow(["id", "worker_code", "worker_name", "violation_types", "camera", "camera_location", "created_at", "status"])
+        for v in rows:
+            worker_name = ""
+            try:
+                if getattr(v, "worker", None):
+                    worker_name = getattr(v.worker, "fullName", None) or getattr(v.worker, "name", None)
+            except Exception:
+                worker_name = ""
+            if not worker_name:
+                worker_name = getattr(v, "worker_name", None) or getattr(v, "worker", None) or ""
+            cam_name = "Video Upload" if getattr(v, "camera_id", None) is None else ""
+            cam_loc = "Video Upload" if getattr(v, "camera_id", None) is None else ""
+            try:
+                cam = getattr(v, "camera", None)
+                if cam:
+                    cam_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                    cam_loc = getattr(cam, "location", "") or cam_name
+            except Exception:
+                pass
+            created_at_str = to_iso_ph(getattr(v, "created_at", None))
+            cw.writerow([
+                getattr(v, "id", ""),
+                getattr(v, "worker_code", ""),
+                worker_name,
+                getattr(v, "violation_types", "") or getattr(v, "violation_type", ""),
+                cam_name,
+                cam_loc,
+                created_at_str,
+                getattr(v, "status", "Pending")
+            ])
+        output = si.getvalue()
+        nowstr = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        headers = {"Content-Disposition": f'attachment; filename="report_{period}_{nowstr}.csv"'}
+        return Response(content=output, media_type="text/csv", headers=headers)
+    finally:
+        sess.close()
