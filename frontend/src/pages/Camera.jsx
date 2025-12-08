@@ -163,6 +163,12 @@ export default function Camera() {
     if (selectedCameraJobId && String(selectedCameraJobId) === String(cameraJobId)) setSelectedCameraJobId(null);
   };
 
+  // get token helper (adjust to how you store token)
+  const getAuthHeader = () => {
+    const token = localStorage.getItem("access_token") || localStorage.getItem("token");
+    return token ? { "Authorization": `Bearer ${token}` } : {};
+  };
+
   const createJob = async (file, opts = {}) => {
     const payload = {
       job_type: "video",
@@ -173,15 +179,16 @@ export default function Camera() {
         is_stream: !!opts.is_stream
       }
     };
+    const headers = { "Content-Type": "application/json", ...getAuthHeader() };
     const res = await fetch(`${API_BASE}/jobs`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}` 
-      },
+      headers,
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error("Failed to create job");
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>"");
+      throw new Error(`Failed to create job: ${res.status} ${txt}`);
+    }
     const data = await res.json();
     return data.job_id;
   };
@@ -189,8 +196,10 @@ export default function Camera() {
   const uploadJobVideo = async (jobId, file) => {
     const fd = new FormData();
     fd.append("file", file, file.name);
+    const headers = { ...getAuthHeader() }; // don't set Content-Type for FormData
     const res = await fetch(`${API_BASE}/jobs/${jobId}/upload`, {
       method: "POST",
+      headers,
       body: fd,
     });
     if (!res.ok) {
@@ -199,6 +208,7 @@ export default function Camera() {
     }
     return await res.json();
   };
+
 
   const handleVideoUpload = async (event) => {
     const file = event.target.files?.[0];
