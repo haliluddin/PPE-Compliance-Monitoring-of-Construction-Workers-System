@@ -56,8 +56,6 @@ _OCR_LOCK = Lock()
 PH_TZ = timezone(timedelta(hours=8))
 _POSE_INSTANCE = None
 _POSE_LOCK = Lock()
-_MIN_PUBLISH_INTERVAL = float(os.environ.get("MIN_PUBLISH_INTERVAL", "0.5"))
-_last_publish_time = {}
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -416,40 +414,21 @@ def _process_image(image_bytes, meta=None):
         if annotated is not None:
             try:
                 should_publish_image = any((p.get("violations") or []) for p in people)
-                job_for_publish = job_id if job_id is not None else camera_id
-                now_ts = time.time()
-                can_publish = True
-                if job_for_publish is not None:
-                    last = _last_publish_time.get(job_for_publish, 0.0)
-                    if (now_ts - last) < _MIN_PUBLISH_INTERVAL:
-                        can_publish = False
-                    else:
-                        _last_publish_time[job_for_publish] = now_ts
-                try:
+                if should_publish_image:
                     h, w = annotated.shape[:2]
-                    target_w_for_db = 320
-                    if w > target_w_for_db:
-                        scale = target_w_for_db / float(w)
-                        annotated_small_db = cv2.resize(annotated, (int(w*scale), int(h*scale)))
+                    target_w = 640
+                    if w > target_w:
+                        scale = target_w / float(w)
+                        annotated_small = cv2.resize(annotated, (int(w*scale), int(h*scale)))
                     else:
-                        annotated_small_db = annotated
-                    _, jpg_db = cv2.imencode('.jpg', annotated_small_db, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
-                    annotated_bytes = jpg_db.tobytes()
-                except Exception:
-                    annotated_bytes = None
-                if can_publish and should_publish_image:
-                    try:
-                        h, w = annotated.shape[:2]
-                        target_w_for_net = 320
-                        if w > target_w_for_net:
-                            scale = target_w_for_net / float(w)
-                            annotated_small_net = cv2.resize(annotated, (int(w*scale), int(h*scale)))
-                        else:
-                            annotated_small_net = annotated
-                        _, jpg_net = cv2.imencode('.jpg', annotated_small_net, [int(cv2.IMWRITE_JPEG_QUALITY), 30])
-                        annotated_b64 = base64.b64encode(jpg_net.tobytes()).decode("ascii")
-                    except Exception:
-                        annotated_b64 = None
+                        annotated_small = annotated
+                    _, jpgall = cv2.imencode('.jpg', annotated_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
+                    annotated_b64 = base64.b64encode(jpgall.tobytes()).decode("ascii")
+                    annotated_bytes = jpgall.tobytes()
+                else:
+                    annotated_b64 = None
+                    _, jpgall = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
+                    annotated_bytes = jpgall.tobytes()
             except Exception:
                 annotated_b64 = None
                 annotated_bytes = None
@@ -500,7 +479,9 @@ else:
             _process_image(image_bytes, meta)
         except Exception:
             log.exception("background _process_image failed")
+
     def process_image_task(*args, **kwargs):
+        """Schedule _process_image to run in a daemon thread and return immediately."""
         try:
             t = threading.Thread(target=_bg_wrapper, args=(args[0] if args else None, kwargs.get('meta') if kwargs else None), daemon=True)
             t.start()
@@ -508,5 +489,7 @@ else:
         except Exception:
             log.exception("failed to spawn thread for process_image_task, running synchronously")
             return _process_image(*args, **kwargs)
+
+    
 def process_image(image_bytes, meta=None):
-    return _process_image(image_bytes, meta)
+    return _process_image(image_bytes, meta) 

@@ -150,6 +150,9 @@ export default function Reports() {
     window.print();
   };
 
+  // prepare ticks for performance charts: only dates that have data
+  const performanceTicks = performanceData.map((p) => p.date);
+
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6" id="printable-reports">
 
@@ -321,7 +324,7 @@ export default function Reports() {
             <ResponsiveContainer width="100%" height={300}>
               <AreaChart data={performanceData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} ticks={performanceTicks} />
                 <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
                 <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
                 <Legend wrapperStyle={{ paddingTop: '10px' }} />
@@ -337,7 +340,7 @@ export default function Reports() {
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={performanceData.map(p => ({ date: p.date, time: p.violations } ))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} ticks={performanceTicks} />
                 <YAxis tick={{ fontSize: 12, fill: '#9CA3AF' }} axisLine={false} />
                 <Tooltip contentStyle={{ backgroundColor: '#1E1F23', border: '1px solid #374151', borderRadius: '0.5rem', color: '#E5E7EB' }} />
                 <Line type="monotone" dataKey="time" stroke="#5388DF" strokeWidth={2} dot={{ r: 6 }} activeDot={{ r: 8 }} />

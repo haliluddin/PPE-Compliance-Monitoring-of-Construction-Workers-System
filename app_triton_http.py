@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -15,11 +14,10 @@ import threading
 import queue
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from fastapi import Depends
 from app.router.auth import get_current_user
 import numpy as np
 import cv2
@@ -40,6 +38,7 @@ except Exception:
 from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
+from sqlalchemy.orm import Session
 log = logging.getLogger("uvicorn.error")
 app = FastAPI()
 app.add_middleware(
@@ -94,6 +93,7 @@ redis_sync = None
 redis_pubsub = None
 ws_clients = set()
 APP_LOOP = None
+REDIS_THREAD = None
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
 STREAM_QUEUES = {}
@@ -137,10 +137,43 @@ def load_model_metadata(client, model_name):
         return {'input_name': input_name, 'output_names': output_names}
     except Exception:
         return {'input_name': None, 'output_names': []}
+def _redis_forward_thread():
+    global redis_pubsub, APP_LOOP, ws_clients
+    if redis_pubsub is None:
+        return
+    while True:
+        try:
+            message = None
+            try:
+                message = redis_pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            except Exception:
+                message = None
+            if not message:
+                time.sleep(0.01)
+                continue
+            data = message.get("data")
+            if data is None:
+                continue
+            try:
+                if isinstance(data, bytes):
+                    payload = json.loads(data.decode("utf-8"))
+                else:
+                    payload = json.loads(data)
+            except Exception:
+                payload = {"raw": str(data)}
+            loop = APP_LOOP
+            if loop is not None:
+                for ws in list(ws_clients):
+                    try:
+                        asyncio.run_coroutine_threadsafe(ws.send_json(payload), loop)
+                    except Exception:
+                        pass
+        except Exception:
+            time.sleep(0.1)
 @app.on_event("startup")
 def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
-    global APP_LOOP
+    global APP_LOOP, REDIS_THREAD
     raw_url = TRITON_URL
     if not raw_url:
         triton = None
@@ -197,9 +230,15 @@ def startup_event():
     except Exception:
         redis_sync = None
         redis_pubsub = None
-    APP_LOOP = asyncio.get_event_loop()
     try:
-        asyncio.create_task(redis_subscriber_task())
+        APP_LOOP = asyncio.get_event_loop()
+    except Exception:
+        APP_LOOP = None
+    try:
+        if redis_pubsub is not None:
+            t = threading.Thread(target=_redis_forward_thread, daemon=True)
+            t.start()
+            REDIS_THREAD = t
     except Exception:
         pass
 @app.on_event("shutdown")
@@ -327,74 +366,90 @@ def _submit_processing(img_bytes, meta):
         except Exception:
             pass
 def process_video_file(job_id: int, filepath: str, camera_id=None):
-    cap = cv2.VideoCapture(filepath)
+    cap = None
     try:
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap = cv2.VideoCapture(filepath)
     except Exception:
-        pass
-    q = queue.Queue(maxsize=2)
-    STREAM_QUEUES[job_id] = q
-    stop_event = threading.Event()
-    STREAM_EVENTS[job_id] = stop_event
-    def consumer():
-        while not stop_event.is_set():
-            try:
-                item = q.get(timeout=0.5)
-            except Exception:
-                continue
-            if item is None:
-                break
-            img_bytes, meta = item
-            acquired = PROCESS_SEM.acquire(blocking=False)
-            if not acquired:
-                continue
-            try:
-                _submit_processing(img_bytes, meta)
-            except Exception:
-                try:
-                    PROCESS_SEM.release()
-                except Exception:
-                    pass
-    consumer_thread = threading.Thread(target=consumer, daemon=True)
-    consumer_thread.start()
-    frame_idx = 0
-    sess = SessionLocal()
-    job = None
+        cap = None
     try:
-        job = sess.query(Job).filter(Job.id == job_id).first()
-        if job:
-            job.status = "running"
-            job.started_at = datetime.now(timezone.utc)
-            sess.commit()
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
-                small_w = 640
-                h, w = frame.shape[:2]
-                if w > small_w:
-                    scale = small_w / float(w)
-                    frame_small = cv2.resize(frame, (int(w*scale), int(h*scale)))
-                else:
-                    frame_small = frame
+        if cap is not None:
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+        q = queue.Queue(maxsize=2)
+        STREAM_QUEUES[job_id] = q
+        stop_event = threading.Event()
+        STREAM_EVENTS[job_id] = stop_event
+        def consumer():
+            while not stop_event.is_set():
                 try:
-                    _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
-                    img_bytes = jpg.tobytes()
+                    item = q.get(timeout=0.5)
                 except Exception:
-                    frame_idx += 1
                     continue
-                meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                if item is None:
+                    break
+                img_bytes, meta = item
+                acquired = PROCESS_SEM.acquire(blocking=False)
+                if not acquired:
+                    continue
                 try:
-                    if q.full():
-                        try:
-                            q.get_nowait()
-                        except Exception:
-                            pass
-                    q.put_nowait((img_bytes, meta))
+                    _submit_processing(img_bytes, meta)
                 except Exception:
-                    pass
-            frame_idx += 1
+                    try:
+                        PROCESS_SEM.release()
+                    except Exception:
+                        pass
+        consumer_thread = threading.Thread(target=consumer, daemon=True)
+        consumer_thread.start()
+        frame_idx = 0
+        sess = SessionLocal()
+        job = None
+        try:
+            job = sess.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.status = "running"
+                job.started_at = datetime.now(timezone.utc)
+                sess.commit()
+        except Exception:
+            sess.rollback()
+        while True:
+            try:
+                if cap is None:
+                    raise RuntimeError("cv2.VideoCapture failed to open file")
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
+                    small_w = 640
+                    h, w = frame.shape[:2]
+                    if w > small_w:
+                        scale = small_w / float(w)
+                        frame_small = cv2.resize(frame, (int(w*scale), int(h*scale)))
+                    else:
+                        frame_small = frame
+                    try:
+                        _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
+                        img_bytes = jpg.tobytes()
+                    except Exception:
+                        frame_idx += 1
+                        continue
+                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                    try:
+                        if q.full():
+                            try:
+                                q.get_nowait()
+                            except Exception:
+                                pass
+                        q.put_nowait((img_bytes, meta))
+                    except Exception:
+                        pass
+                frame_idx += 1
+            except Exception:
+                log.exception("frame loop error in process_video_file")
+                time.sleep(0.5)
+                frame_idx += 1
+                continue
         stop_event.set()
         try:
             q.put_nowait(None)
@@ -402,26 +457,36 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             pass
         consumer_thread.join(timeout=1.0)
         if job:
-            job.status = "completed"
-            job.finished_at = datetime.now(timezone.utc)
-            sess.commit()
-    except Exception:
-        try:
-            if job:
-                job.status = "error"
+            try:
+                job.status = "completed"
                 job.finished_at = datetime.now(timezone.utc)
                 sess.commit()
+            except Exception:
+                sess.rollback()
+    except Exception:
+        log.exception("process_video_file top-level error")
+        try:
+            sess = SessionLocal()
+            try:
+                job = sess.query(Job).filter(Job.id == job_id).first()
+                if job:
+                    job.status = "error"
+                    job.finished_at = datetime.now(timezone.utc)
+                    sess.commit()
+            except Exception:
+                sess.rollback()
+            finally:
+                sess.close()
         except Exception:
             pass
     finally:
         try:
-            cap.release()
+            if cap is not None:
+                cap.release()
         except Exception:
             pass
         STREAM_QUEUES.pop(job_id, None)
         STREAM_EVENTS.pop(job_id, None)
-        sess.close()
-
 @app.post("/jobs/{job_id}/upload")
 async def upload_job_video(job_id: int, file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     INFER_REQUESTS.inc()
@@ -433,14 +498,11 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         camera_id = job.camera_id
     finally:
         sess.close()
-
     filename = f"job_{job_id}_{int(time.time())}_{file.filename}"
     filepath = os.path.join(tmp_upload_dir, filename)
-
-    # Use aiofiles to stream asynchronously to disk
     try:
         async with aiofiles.open(filepath, "wb") as out_f:
-            chunk_size = 1024 * 1024  # 1MB
+            chunk_size = 1024 * 1024
             while True:
                 chunk = await file.read(chunk_size)
                 if not chunk:
@@ -452,8 +514,6 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"failed to save upload: {str(e)}")
-
-    # schedule processing in background (returns immediately)
     TASKS_QUEUED.inc()
     if background_tasks is not None:
         background_tasks.add_task(process_video_file, job_id, filepath, camera_id)
@@ -461,88 +521,104 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         thread = threading.Thread(target=process_video_file, args=(job_id, filepath, camera_id), daemon=True)
         STREAM_THREADS[job_id] = thread
         thread.start()
-
     return {"status": "accepted", "job_id": job_id}
-
 class StreamStart(BaseModel):
     stream_url: str
     camera_id: int = None
     job_id: int = None
 def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threading.Event = None):
-    cap = cv2.VideoCapture(rtsp_url)
+    cap = None
     try:
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap = cv2.VideoCapture(rtsp_url)
     except Exception:
-        pass
-    q = queue.Queue(maxsize=2)
-    STREAM_QUEUES[job_id] = q
-    if stop_event is None:
-        stop_event = threading.Event()
-        STREAM_EVENTS[job_id] = stop_event
-    frame_idx = 0
-    sess = SessionLocal()
-    job = None
-    def consumer():
-        while not stop_event.is_set():
-            try:
-                item = q.get(timeout=0.5)
-            except Exception:
-                continue
-            if item is None:
-                break
-            img_bytes, meta = item
-            acquired = PROCESS_SEM.acquire(blocking=False)
-            if not acquired:
-                continue
-            try:
-                _submit_processing(img_bytes, meta)
-            except Exception:
-                try:
-                    PROCESS_SEM.release()
-                except Exception:
-                    pass
-    consumer_thread = threading.Thread(target=consumer, daemon=True)
-    consumer_thread.start()
+        cap = None
     try:
+        if cap is not None:
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+        q = queue.Queue(maxsize=2)
+        STREAM_QUEUES[job_id] = q
+        if stop_event is None:
+            stop_event = threading.Event()
+            STREAM_EVENTS[job_id] = stop_event
+        frame_idx = 0
+        sess = SessionLocal()
         job = None
-        if job_id:
-            job = sess.query(Job).filter(Job.id == job_id).first()
-            if job:
-                job.status = "running"
-                job.started_at = datetime.now(timezone.utc)
-                sess.commit()
-        while True:
-            if stop_event is not None and stop_event.is_set():
-                break
-            ret, frame = cap.read()
-            if not ret:
-                time.sleep(0.05)
-                continue
-            if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
-                small_w = 640
-                h, w = frame.shape[:2]
-                if w > small_w:
-                    scale = small_w / float(w)
-                    frame_small = cv2.resize(frame, (int(w*scale), int(h*scale)))
-                else:
-                    frame_small = frame
+        def consumer():
+            while not stop_event.is_set():
                 try:
-                    _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
-                    img_bytes = jpg.tobytes()
+                    item = q.get(timeout=0.5)
                 except Exception:
+                    continue
+                if item is None:
+                    break
+                img_bytes, meta = item
+                acquired = PROCESS_SEM.acquire(blocking=False)
+                if not acquired:
+                    continue
+                try:
+                    _submit_processing(img_bytes, meta)
+                except Exception:
+                    try:
+                        PROCESS_SEM.release()
+                    except Exception:
+                        pass
+        consumer_thread = threading.Thread(target=consumer, daemon=True)
+        consumer_thread.start()
+        try:
+            if job_id:
+                job = sess.query(Job).filter(Job.id == job_id).first()
+                if job:
+                    job.status = "running"
+                    job.started_at = datetime.now(timezone.utc)
+                    sess.commit()
+        except Exception:
+            sess.rollback()
+        while True:
+            try:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                if cap is None:
+                    log.warning("cv2.VideoCapture failed for stream %s (job %s)", rtsp_url, job_id)
+                    time.sleep(1.0)
                     frame_idx += 1
                     continue
-                meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
-                try:
-                    if q.full():
-                        try:
-                            q.get_nowait()
-                        except Exception:
-                            pass
-                    q.put_nowait((img_bytes, meta))
-                except Exception:
-                    pass
-            frame_idx += 1
+                ret, frame = cap.read()
+                if not ret:
+                    time.sleep(0.05)
+                    continue
+                if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
+                    small_w = 640
+                    h, w = frame.shape[:2]
+                    if w > small_w:
+                        scale = small_w / float(w)
+                        frame_small = cv2.resize(frame, (int(w*scale), int(h*scale)))
+                    else:
+                        frame_small = frame
+                    try:
+                        _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
+                        img_bytes = jpg.tobytes()
+                    except Exception:
+                        frame_idx += 1
+                        continue
+                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                    try:
+                        if q.full():
+                            try:
+                                q.get_nowait()
+                            except Exception:
+                                pass
+                        q.put_nowait((img_bytes, meta))
+                    except Exception:
+                        pass
+                frame_idx += 1
+            except Exception:
+                log.exception("frame loop error in stream_loop")
+                time.sleep(0.5)
+                frame_idx += 1
+                continue
         stop_event.set()
         try:
             q.put_nowait(None)
@@ -553,14 +629,34 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             job.status = "completed"
             job.finished_at = datetime.now(timezone.utc)
             sess.commit()
+    except Exception:
+        log.exception("stream_loop top-level error")
+        try:
+            sess2 = SessionLocal()
+            try:
+                job = sess2.query(Job).filter(Job.id == job_id).first()
+                if job:
+                    job.status = "error"
+                    job.finished_at = datetime.now(timezone.utc)
+                    sess2.commit()
+            except Exception:
+                sess2.rollback()
+            finally:
+                sess2.close()
+        except Exception:
+            pass
     finally:
         try:
-            cap.release()
+            if cap is not None:
+                cap.release()
         except Exception:
             pass
         STREAM_QUEUES.pop(job_id, None)
         STREAM_EVENTS.pop(job_id, None)
-        sess.close()
+        try:
+            sess.close()
+        except Exception:
+            pass
 @app.post("/streams")
 def start_stream(payload: StreamStart, current_user=Depends(get_current_user)):
     rtsp_url = payload.stream_url
@@ -886,171 +982,25 @@ def create_camera(payload: dict = Body(...)):
         return {"camera_id": getattr(cam, "id", None), "id": getattr(cam, "id", None), "name": getattr(cam, "name", None), "location": getattr(cam, "location", None)}
     finally:
         sess.close()
-def _period_bounds(period: str):
-    now_ph = datetime.now(PH_TZ)
-    today_start_ph = now_ph.replace(hour=0, minute=0, second=0, microsecond=0)
-    if period == "last_week":
-        end_ph = today_start_ph
-        start_ph = end_ph - timedelta(days=7)
-        days = 7
-    elif period == "last_month":
-        end_ph = today_start_ph
-        start_ph = end_ph - timedelta(days=30)
-        days = 30
-    else:
-        start_ph = today_start_ph
-        end_ph = start_ph + timedelta(days=1)
-        days = 1
-
-    start_utc = start_ph.astimezone(timezone.utc).replace(tzinfo=None)
-    end_utc = end_ph.astimezone(timezone.utc).replace(tzinfo=None)
-    return start_ph, start_utc, end_utc, days
+from app.router.reports import get_reports_summary as reports_summary_func, get_performance_data as reports_performance_func, export_reports as reports_export_func
 @app.get("/reports")
-def quick_reports(period: str = "today"):
+def quick_reports_proxy(period: str = "today", current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
-        start_ph, start_utc, end_utc, days = _period_bounds(period)
-        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
-        total_incidents = len(rows)
-        counts = {}
-        camera_counts = {}
-        type_counts = {}
-        resolved = 0
-        for v in rows:
-            worker_display = None
-            try:
-                if getattr(v, "worker", None):
-                    worker_display = getattr(v.worker, "fullName", None) or getattr(v.worker, "name", None)
-            except Exception:
-                worker_display = None
-            if not worker_display:
-                worker_display = getattr(v, "worker_name", None) or getattr(v, "worker", None) or getattr(v, "worker_code", "UNKNOWN")
-            counts[worker_display] = counts.get(worker_display, 0) + 1
-            cam = getattr(v, "camera", None)
-            if cam:
-                cam_key = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
-            else:
-                cam_key = "Video Upload" if getattr(v, "camera_id", None) is None else "Unknown"
-            camera_counts[cam_key] = camera_counts.get(cam_key, 0) + 1
-            vt = getattr(v, "violation_types", None) or ""
-            if vt:
-                try:
-                    parts = [p.strip() for p in str(vt).split(",") if p.strip()]
-                    for p in parts:
-                        type_counts[p] = type_counts.get(p, 0) + 1
-                except Exception:
-                    type_counts[str(vt)] = type_counts.get(str(vt), 0) + 1
-            else:
-                type_counts["Unknown"] = type_counts.get("Unknown", 0) + 1
-            if getattr(v, "status", "").lower() == "resolved":
-                resolved += 1
-        top_offenders = [{"name": k, "value": v} for k, v in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
-        camera_data = [{"location": k, "violations": v, "risk": "High" if v > 5 else "Medium" if v > 2 else "Low"} for k, v in camera_counts.items()]
-        most_violations = [{"name": k, "violations": v} for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)]
-        worker_data = []
-        for i, (k, v) in enumerate(sorted(counts.items(), key=lambda x: x[1], reverse=True)):
-            resolved_for_worker = 0
-            resolution_rate = 0
-            worker_data.append({"rank": i+1, "name": k, "violations": v, "resolved": resolved_for_worker, "resolution_rate": resolution_rate})
-        violation_resolution_rate = round((resolved / total_incidents * 100) if total_incidents > 0 else 0, 2)
-        return {
-            "total_incidents": total_incidents,
-            "total_workers_involved": len(counts),
-            "violation_resolution_rate": violation_resolution_rate,
-            "high_risk_locations": sum(1 for d in camera_data if d["risk"] == "High"),
-            "most_violations": most_violations,
-            "top_offenders": top_offenders,
-            "camera_data": camera_data,
-            "worker_data": worker_data
-        }
+        return reports_summary_func(db=sess, current_user=current_user, period=period)
     finally:
         sess.close()
 @app.get("/reports/performance")
-def reports_performance(period: str = "today"):
+def reports_performance_proxy(period: str = "today", current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
-        start_ph, start_utc, end_utc, days = _period_bounds(period)
-        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
-        date_buckets = {}
-        for i in range(days):
-            d = (start_ph + timedelta(days=i)).strftime("%Y-%m-%d")
-            date_buckets[d] = {"violations": 0, "compliance": 0}
-        response_times = []
-        for v in rows:
-            dt = getattr(v, "created_at", None)
-            if not dt:
-                continue
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            date_key = dt.astimezone(PH_TZ).strftime("%Y-%m-%d")
-            if date_key not in date_buckets:
-                date_buckets[date_key] = {"violations": 0, "compliance": 0}
-            date_buckets[date_key]["violations"] += 1
-            if getattr(v, "status", "").lower() == "resolved":
-                date_buckets[date_key]["compliance"] += 1
-            rt = getattr(v, "response_time", None)
-            if isinstance(rt, (int, float)):
-                response_times.append(float(rt))
-            else:
-                resolved_at = getattr(v, "resolved_at", None)
-                created_at = getattr(v, "created_at", None)
-                try:
-                    if resolved_at is not None and created_at is not None:
-                        if resolved_at.tzinfo is None:
-                            resolved_at = resolved_at.replace(tzinfo=timezone.utc)
-                        if created_at.tzinfo is None:
-                            created_at = created_at.replace(tzinfo=timezone.utc)
-                        delta_min = (resolved_at - created_at).total_seconds() / 60.0
-                        if delta_min >= 0:
-                            response_times.append(delta_min)
-                except Exception:
-                    pass
-        performance_over_time = [{"date": k, "violations": v["violations"], "compliance": v["compliance"]} for k, v in sorted(date_buckets.items())]
-        average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0
-        return {"performance_over_time": performance_over_time, "average_response_time": average_response_time}
+        return reports_performance_func(db=sess, current_user=current_user, period=period)
     finally:
         sess.close()
 @app.get("/reports/export")
-def reports_export(period: str = "today"):
+def reports_export_proxy(period: str = "today", current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
-        start_ph, start_utc, end_utc, days = _period_bounds(period)
-        rows = sess.query(Violation).filter(Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
-        si = io.StringIO()
-        cw = csv.writer(si)
-        cw.writerow(["id", "worker_code", "worker_name", "violation_types", "camera", "camera_location", "created_at", "status"])
-        for v in rows:
-            worker_name = ""
-            try:
-                if getattr(v, "worker", None):
-                    worker_name = getattr(v.worker, "fullName", None) or getattr(v.worker, "name", None)
-            except Exception:
-                worker_name = ""
-            if not worker_name:
-                worker_name = getattr(v, "worker_name", None) or getattr(v, "worker", None) or ""
-            cam_name = "Video Upload" if getattr(v, "camera_id", None) is None else ""
-            cam_loc = "Video Upload" if getattr(v, "camera_id", None) is None else ""
-            try:
-                cam = getattr(v, "camera", None)
-                if cam:
-                    cam_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
-                    cam_loc = getattr(cam, "location", "") or cam_name
-            except Exception:
-                pass
-            created_at_str = to_iso_ph(getattr(v, "created_at", None))
-            cw.writerow([
-                getattr(v, "id", ""),
-                getattr(v, "worker_code", ""),
-                worker_name,
-                getattr(v, "violation_types", "") or getattr(v, "violation_type", ""),
-                cam_name,
-                cam_loc,
-                created_at_str,
-                getattr(v, "status", "Pending")
-            ])
-        output = si.getvalue()
-        nowstr = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        headers = {"Content-Disposition": f'attachment; filename="report_{period}_{nowstr}.csv"'}
-        return Response(content=output, media_type="text/csv", headers=headers)
+        return reports_export_func(db=sess, current_user=current_user, period=period)
     finally:
         sess.close()

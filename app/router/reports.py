@@ -9,28 +9,35 @@ from app.router.auth import get_current_user
 import csv
 from fastapi.responses import StreamingResponse
 from io import StringIO
+from collections import Counter
+import re
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 PH_TZ = timezone(timedelta(hours=8))
 
+
 def _period_bounds(period: str):
     now_ph = datetime.now(PH_TZ)
     today_start_ph = now_ph.replace(hour=0, minute=0, second=0, microsecond=0)
+
     if period == "last_week":
-        end_ph = today_start_ph
-        start_ph = end_ph - timedelta(days=7)
-        days = 7
+        start_ph = today_start_ph - timedelta(days=6)
+        end_ph = today_start_ph + timedelta(days=1)
+        days = (end_ph - start_ph).days
     elif period == "last_month":
-        end_ph = today_start_ph
-        start_ph = end_ph - timedelta(days=30)
-        days = 30
+        start_ph = today_start_ph - timedelta(days=29)
+        end_ph = today_start_ph + timedelta(days=1)
+        days = (end_ph - start_ph).days
     else:
         start_ph = today_start_ph
         end_ph = start_ph + timedelta(days=1)
         days = 1
-    start_utc = start_ph.astimezone(timezone.utc)
-    end_utc = end_ph.astimezone(timezone.utc)
+
+    start_utc = start_ph.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_ph.astimezone(timezone.utc).replace(tzinfo=None)
+
     return start_ph, start_utc, end_utc, days
+
 
 def _to_iso_ph(dt):
     if dt is None:
@@ -45,6 +52,7 @@ def _to_iso_ph(dt):
         except Exception:
             return None
 
+
 @router.get("/")
 def get_reports_summary(
     db: Session = Depends(get_db),
@@ -54,45 +62,52 @@ def get_reports_summary(
     user_id = current_user.id
     start_ph, start_utc, end_utc, days = _period_bounds(period)
 
+    base_filter = and_(Violation.user_id == user_id, Violation.created_at >= start_utc, Violation.created_at < end_utc)
+
     total_incidents = (
         db.query(func.count(Violation.id))
-        .filter(Violation.user_id == user_id, Violation.created_at >= start_utc, Violation.created_at < end_utc)
+        .filter(base_filter)
         .scalar() or 0
     )
 
     total_workers_involved = (
         db.query(func.count(func.distinct(Violation.worker_id)))
-        .filter(Violation.user_id == user_id, Violation.created_at >= start_utc, Violation.created_at < end_utc)
+        .filter(base_filter)
         .scalar() or 0
     )
 
     resolved_count = (
         db.query(func.count(Violation.id))
-        .filter(Violation.user_id == user_id, Violation.created_at >= start_utc, Violation.created_at < end_utc, func.lower(func.coalesce(Violation.status, "")) == "resolved")
+        .filter(base_filter, func.lower(func.coalesce(Violation.status, "")) == "resolved")
         .scalar() or 0
     )
 
     total_violations = total_incidents
-
     violation_resolution_rate = round((resolved_count / total_violations) * 100, 2) if total_violations > 0 else 0
 
     high_risk_locations = (
         db.query(Violation.camera_id)
-        .filter(Violation.user_id == user_id, Violation.created_at >= start_utc, Violation.created_at < end_utc)
+        .filter(base_filter)
         .group_by(Violation.camera_id)
         .having(func.count(Violation.id) > 10)
         .count()
     )
 
-    most_violations_raw = (
-        db.query(Violation.violation_types, func.count(Violation.id).label("count"))
-        .filter(Violation.user_id == user_id, Violation.created_at >= start_utc, Violation.created_at < end_utc)
-        .group_by(Violation.violation_types)
-        .order_by(func.count(Violation.id).desc())
-        .limit(5)
-        .all()
-    )
-    most_violations = [{"name": mv[0], "violations": mv[1]} for mv in most_violations_raw]
+    # Properly split and count individual violation types
+    rows = db.query(Violation.violation_types).filter(base_filter).all()
+    counter = Counter()
+    for row in rows:
+        vt = row[0]
+        if not vt:
+            continue
+        s = str(vt).strip()
+        s = re.sub(r'^[\(\[\{]+|[\)\]\}]+$', '', s)
+        parts = [p.strip().strip("'\"") for p in s.split(',') if p.strip()]
+        for p in parts:
+            if p:
+                counter[p] += 1
+
+    most_violations = [{"name": name, "violations": count} for name, count in counter.most_common(5)]
 
     top_offenders_raw = (
         db.query(Worker.fullName, func.count(Violation.id).label("violations"))
@@ -177,6 +192,7 @@ def get_reports_summary(
         "worker_data": worker_data
     }
 
+
 @router.get("/performance")
 def get_performance_data(
     db: Session = Depends(get_db),
@@ -185,13 +201,10 @@ def get_performance_data(
 ):
     user_id = current_user.id
     start_ph, start_utc, end_utc, days = _period_bounds(period)
+
     rows = db.query(Violation).filter(Violation.user_id == user_id, Violation.created_at >= start_utc, Violation.created_at < end_utc).all()
 
-    date_buckets = {}
-    for i in range(days):
-        d = (start_ph + timedelta(days=i)).strftime("%Y-%m-%d")
-        date_buckets[d] = {"violations": 0, "compliance": 0}
-
+    buckets = {}
     response_times = []
     for v in rows:
         dt = getattr(v, "created_at", None)
@@ -200,11 +213,12 @@ def get_performance_data(
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         date_key = dt.astimezone(PH_TZ).strftime("%Y-%m-%d")
-        if date_key not in date_buckets:
-            date_buckets[date_key] = {"violations": 0, "compliance": 0}
-        date_buckets[date_key]["violations"] += 1
+
+        entry = buckets.setdefault(date_key, {"violations": 0, "compliance": 0})
+        entry["violations"] += 1
         if getattr(v, "status", "") and str(getattr(v, "status", "")).lower() == "resolved":
-            date_buckets[date_key]["compliance"] += 1
+            entry["compliance"] += 1
+
         rt = getattr(v, "response_time", None)
         if isinstance(rt, (int, float)):
             response_times.append(float(rt))
@@ -223,10 +237,14 @@ def get_performance_data(
             except Exception:
                 pass
 
-    performance_over_time = [{"date": k, "violations": v["violations"], "compliance": v["compliance"]} for k, v in sorted(date_buckets.items())]
+    performance_over_time = [
+        {"date": d, "violations": v["violations"], "compliance": v["compliance"]}
+        for d, v in sorted(buckets.items())
+    ]
     average_response_time = round(sum(response_times) / len(response_times), 2) if response_times else 0
 
     return {"performance_over_time": performance_over_time, "average_response_time": average_response_time}
+
 
 @router.get("/export")
 def export_reports(

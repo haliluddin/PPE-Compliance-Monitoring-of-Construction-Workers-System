@@ -256,9 +256,10 @@ export default function Camera() {
   };
 
   const startStreamOnServer = async ({ stream_url, camera_id }) => {
+    const headers = { "Content-Type": "application/json", ...getAuthHeader() };
     const res = await fetch(`${API_BASE}/streams`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ stream_url, camera_id })
     });
     if (!res.ok) {
@@ -267,6 +268,7 @@ export default function Camera() {
     }
     return await res.json();
   };
+
 
   const handleAddCameraSubmit = async (e) => {
     e.preventDefault();
@@ -300,18 +302,27 @@ export default function Camera() {
     }
   };
 
-  const handleStopStream = async (jobId) => {
+ const handleStopStream = async (jobId) => {
     if (!jobId) return;
     try {
-      const res = await fetch(`${API_BASE}/streams/${jobId}/stop`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/streams/${jobId}/stop`, {
+        method: "POST",
+        headers: { ...getAuthHeader() }
+      });
       if (res.ok) {
         setCameras(prev => prev.map(c => String(c.job_id) === String(jobId) ? ({ ...c, status: "STOPPED" }) : c));
         if (selectedCameraJobId && String(selectedCameraJobId) === String(jobId)) {
           setSelectedCameraJobId(null);
         }
+      } else {
+        const txt = await res.text().catch(()=>"");
+        console.error("Failed stopping stream:", res.status, txt);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("stop stream error", e);
+    }
   };
+
 
   const nonExpandableStatuses = ["PROCESSING", "UPLOADING", "IDLE", "STARTED", "UPLOAD_FAILED", "STOPPED"];
 

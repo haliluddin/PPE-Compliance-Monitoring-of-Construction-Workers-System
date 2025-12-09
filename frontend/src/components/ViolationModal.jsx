@@ -1,4 +1,3 @@
-// frontend/src/components/ViolationModal.jsx
 import React, { useState } from "react";
 import { FiX, FiUser, FiCamera, FiAlertTriangle, FiClock } from "react-icons/fi";
 import API from "../api";
@@ -6,27 +5,46 @@ import API from "../api";
 export default function ViolationModal({ violation, onClose, onStatusChange }) {
   const [updating, setUpdating] = useState(false);
 
-const handleStatusChange = async (event) => {
-  const newStatus = event.target.value;
-  setUpdating(true);
-  
-  try {
-    const response = await API.put(`/violations/${violation.violation_id}/status`, {
-      status: newStatus.toLowerCase()
-    });
+  const handleStatusChange = async (event) => {
+    const newStatus = event.target.value;
+    setUpdating(true);
 
-    if (response.status === 200) {
-      if (onStatusChange) {
-        onStatusChange(violation.violation_id, newStatus);
+    try {
+      const response = await API.put(`/violations/${violation.violation_id}/status`, {
+        status: newStatus.toLowerCase()
+      });
+
+      if (response.status === 200 || response.status === 204) {
+        // call parent's handler if available — be flexible about the expected args
+        if (onStatusChange) {
+          try {
+            if (typeof onStatusChange === "function") {
+              // call with (violation_id, newStatus) if the function expects 2 args,
+              // otherwise call with single newStatus for backward compatibility.
+              if (onStatusChange.length >= 2) {
+                onStatusChange(violation.violation_id, newStatus);
+              } else {
+                onStatusChange(newStatus);
+              }
+            }
+          } catch (e) {
+            // swallow parent handler errors — we still close modal
+            console.warn("onStatusChange handler errored:", e);
+          }
+        }
+        // Close modal (parent should refresh relevant lists/stats)
+        if (onClose) onClose();
+      } else {
+        // If backend responded non-OK, revert select visually
+        try { event.target.value = violation.status; } catch (e) {}
       }
+    } catch (error) {
+      console.error("Status update failed:", error);
+      try { event.target.value = violation.status; } catch (e) {}
+    } finally {
+      setUpdating(false);
     }
-  } catch (error) {
-    console.error("Status update failed:", error);
-    event.target.value = violation.status;
-  } finally {
-    setUpdating(false);
-  }
-};
+  };
 
   if (!violation) return null;
 
@@ -171,4 +189,3 @@ const handleStatusChange = async (event) => {
     </div>
   );
 }
-
