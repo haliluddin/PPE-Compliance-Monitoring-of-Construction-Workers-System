@@ -1,3 +1,4 @@
+# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -93,7 +94,6 @@ redis_sync = None
 redis_pubsub = None
 ws_clients = set()
 APP_LOOP = None
-REDIS_THREAD = None
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
 STREAM_QUEUES = {}
@@ -137,43 +137,10 @@ def load_model_metadata(client, model_name):
         return {'input_name': input_name, 'output_names': output_names}
     except Exception:
         return {'input_name': None, 'output_names': []}
-def _redis_forward_thread():
-    global redis_pubsub, APP_LOOP, ws_clients
-    if redis_pubsub is None:
-        return
-    while True:
-        try:
-            message = None
-            try:
-                message = redis_pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-            except Exception:
-                message = None
-            if not message:
-                time.sleep(0.01)
-                continue
-            data = message.get("data")
-            if data is None:
-                continue
-            try:
-                if isinstance(data, bytes):
-                    payload = json.loads(data.decode("utf-8"))
-                else:
-                    payload = json.loads(data)
-            except Exception:
-                payload = {"raw": str(data)}
-            loop = APP_LOOP
-            if loop is not None:
-                for ws in list(ws_clients):
-                    try:
-                        asyncio.run_coroutine_threadsafe(ws.send_json(payload), loop)
-                    except Exception:
-                        pass
-        except Exception:
-            time.sleep(0.1)
 @app.on_event("startup")
 def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
-    global APP_LOOP, REDIS_THREAD
+    global APP_LOOP
     raw_url = TRITON_URL
     if not raw_url:
         triton = None
@@ -230,15 +197,9 @@ def startup_event():
     except Exception:
         redis_sync = None
         redis_pubsub = None
+    APP_LOOP = asyncio.get_event_loop()
     try:
-        APP_LOOP = asyncio.get_event_loop()
-    except Exception:
-        APP_LOOP = None
-    try:
-        if redis_pubsub is not None:
-            t = threading.Thread(target=_redis_forward_thread, daemon=True)
-            t.start()
-            REDIS_THREAD = t
+        asyncio.create_task(redis_subscriber_task())
     except Exception:
         pass
 @app.on_event("shutdown")
