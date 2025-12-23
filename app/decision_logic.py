@@ -1,3 +1,4 @@
+# app/decision_logic.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -17,6 +18,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
+# Triton client helpers may not be installed in all environments.
 try:
     from tritonclient.http import InferInput, InferRequestedOutput
 except Exception:
@@ -45,6 +47,7 @@ PPE_COLORS = {0: (200, 100, 200), 1: (10, 200, 200), 2: (180, 120, 40), 3: (240,
 if set(PPE_CLASS_IDS) != set(PPE_LABELS.keys()):
     raise RuntimeError(f"PPE_CLASS_IDS {PPE_CLASS_IDS} and PPE_LABELS keys {list(PPE_LABELS.keys())} mismatch")
 
+
 def _init_mp_pose():
     global _mp_pose, _left_indices, _right_indices
     if _mp_pose is not None:
@@ -65,6 +68,7 @@ def _init_mp_pose():
         except Exception:
             return None
 
+
 def init_pose():
     mp = _init_mp_pose()
     if mp is None:
@@ -84,8 +88,10 @@ def init_pose():
         except Exception:
             return None
 
+
 def get_pose_instance():
     return init_pose()
+
 
 def iou(A, B):
     xA = max(A[0], B[0]); yA = max(A[1], B[1]); xB = min(A[2], B[2]); yB = min(A[3], B[3])
@@ -94,11 +100,13 @@ def iou(A, B):
     u = aA + aB - inter
     return inter / u if u > 0 else 0.0
 
+
 def expand_bbox(b, w, h, pad=CROP_PAD):
     x1, y1, x2, y2 = b
     ww = x2 - x1; hh = y2 - y1
     pad_px = int(max(ww, hh) * pad)
     return max(0, int(x1) - pad_px), max(0, int(y1) - pad_px), min(w - 1, int(x2) + pad_px), min(h - 1, int(y2) + pad_px)
+
 
 def parse_triton_outputs(outputs, H, W):
     out = {cid: [] for cid in PPE_CLASS_IDS}
@@ -149,19 +157,23 @@ def parse_triton_outputs(outputs, H, W):
                     out[cls].append((x1c, y1c, x2c, y2c, final_conf))
     return out, people
 
+
 def abs_lm(landmarks, idx, xoff, yoff, cw, ch):
     lm = landmarks.landmark[idx]
     return (xoff + lm.x * cw, yoff + lm.y * ch, getattr(lm, "visibility", 0.0))
+
 
 def _area(box):
     x1, y1, x2, y2 = box
     w = max(0.0, x2 - x1); h = max(0.0, y2 - y1)
     return w * h
 
+
 def _intersection_area(A, B):
     xA = max(A[0], B[0]); yA = max(A[1], B[1]); xB = min(A[2], B[2]); yB = min(A[3], B[3])
     w = max(0.0, xB - xA); h = max(0.0, yB - yA)
     return w * h
+
 
 def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
     mp_pose = _init_mp_pose()
@@ -364,6 +376,7 @@ def check_ppe(boxes_by_class, person_bbox, landmarks, xoff, yoff, cw, ch):
                 flags["improper_helmet"] = True
     return flags
 
+
 def draw_pose(frame, landmarks, xoff, yoff, cw, ch):
     mp_pose = _init_mp_pose()
     if mp_pose is None:
@@ -391,6 +404,7 @@ def draw_pose(frame, landmarks, xoff, yoff, cw, ch):
             col = (200, 200, 200)
         cv2.circle(frame, (cx, cy), 6, (255, 255, 255), -1, lineType=cv2.LINE_AA)
         cv2.circle(frame, (cx, cy), 4, col, -1, lineType=cv2.LINE_AA)
+
 
 def detect_torso(ocr_reader, crop, regset):
     if crop is None or crop.size == 0:
@@ -426,11 +440,15 @@ def detect_torso(ocr_reader, crop, regset):
         return None, None, 0.0
     return best, best_txt, best_conf
 
-def process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=None, ocr_reader=None, regset=None, pose_instance=None, draw_labels=True):
+
+def process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=None, ocr_reader=None, regset=None, pose_instance=None, person_boxes=None, draw_labels=True):
     H, W = frame.shape[:2]
+
+    # If caller didn't provide triton_outputs but we have a triton client and model metadata,
+    # attempt Triton inference — but only if InferInput helpers are available.
     if (triton_outputs is None and triton_client is not None and triton_model_name is not None and input_name is not None and output_names is not None):
         if InferInput is None or InferRequestedOutput is None:
-            log.warning("Triton helpers not available — skipping Triton inference")
+            log.warning("Triton helpers not available — skipping Triton inference in decision_logic.process_frame")
             triton_outputs = None
         else:
             try:
@@ -443,8 +461,9 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                 res = triton_client.infer(triton_model_name, inputs=[inp], outputs=outputs)
                 triton_outputs = {n: res.as_numpy(n) for n in output_names}
             except Exception:
-                log.exception("Triton inference failed in process_frame")
+                log.exception("Triton inference failed in process_frame; falling back to local parsing")
                 triton_outputs = None
+
     boxes_by_class, parsed_people = parse_triton_outputs(triton_outputs, H, W)
     if person_boxes is None:
         person_boxes = parsed_people
@@ -476,6 +495,7 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
             try:
                 flags = check_ppe(boxes_by_class, person_bbox, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
             except Exception:
+                log.exception("check_ppe failed")
                 flags = {}
             if not flags.get("helmet", False):
                 violations.append("NO HELMET")
@@ -535,7 +555,7 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                             except Exception:
                                 matched_id_conf = 0.0
                     except Exception:
-                        pass
+                        log.exception("detect_torso failed")
         else:
             vest_boxes = boxes_by_class.get(3, [])
             helmet_boxes = boxes_by_class.get(1, [])
@@ -545,7 +565,7 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                 if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.02 for (bx1, by1, bx2, by2, _) in helmet_boxes):
                     violations.append("NO HELMET")
             except Exception:
-                pass
+                log.exception("fallback bbox checks failed")
             if ocr_reader is not None:
                 pc = frame[int(person_bbox[1]):int(person_bbox[3]), int(person_bbox[0]):int(person_bbox[2])]
                 if pc.size > 0:
@@ -558,30 +578,54 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                             except Exception:
                                 matched_id_conf = 0.0
                     except Exception:
-                        pass
+                        log.exception("detect_torso fallback failed")
+
         if matched_id is not None:
             id_label = matched_id
         else:
             id_label = "UNID"
-        severity_color = (80, 200, 80)
-        vio_set = set([v.upper() for v in violations])
-        if not vio_set:
-            severity_color = (80, 200, 80)
-        else:
-            if len(vio_set) >= 2:
+
+        # Determine bounding-box color based on violations per user's rules:
+        # - RED: 100% violation (no helmet, no vest, no right glove, no left glove, no left shoe, no right shoe)
+        # - GREEN: no violations
+        # - ORANGE: any violation list that contains "NO HELMET" (but not the 100% set above)
+        # - YELLOW: any other non-empty violation list that does NOT contain "NO HELMET"
+        full_viols = {"NO HELMET", "NO VEST", "NO RIGHT GLOVE", "NO LEFT GLOVE", "NO LEFT SHOE", "NO RIGHT SHOE"}
+        vio_set = {v.upper() for v in violations}
+
+        # Defaults
+        severity_color = (80, 200, 80)  # green-ish for no violations
+
+        if vio_set:
+            # Check full 100% violation first
+            if full_viols.issubset(vio_set):
+                # RED (BGR)
                 severity_color = (0, 0, 255)
-            elif vio_set == {"NO HELMET"}:
-                severity_color = (0, 140, 255)
-            elif vio_set == {"NO VEST"}:
-                severity_color = (0, 215, 255)
+            elif "NO HELMET" in vio_set:
+                # ORANGE (BGR) -- approximate orange
+                severity_color = (0, 165, 255)
             else:
-                severity_color = (0, 140, 255)
+                # YELLOW (BGR)
+                severity_color = (0, 255, 255)
+        else:
+            severity_color = (80, 200, 80)
+
+        # Draw bbox and labels
         cv2.rectangle(annotated, (x1i, y1i), (x2i, y2i), severity_color, 2)
         if draw_labels:
             cv2.putText(annotated, f"ID:{id_label}", (x1i, max(12, y1i - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 2, cv2.LINE_AA)
+            # draw all detected violations (one per line) — preserve original order but normalize display to uppercase
             ty = y2i + 18
-            for v in violations:
-                cv2.putText(annotated, v, (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 220), 2, cv2.LINE_AA); ty += 18
+            if violations:
+                for v in violations:
+                    try:
+                        cv2.putText(annotated, v.upper(), (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 220), 2, cv2.LINE_AA)
+                        ty += 18
+                    except Exception:
+                        ty += 18
+            else:
+                cv2.putText(annotated, "NO VIOLATION", (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 220, 20), 2, cv2.LINE_AA)
+
         people_results.append({"bbox": person_bbox, "id": id_label, "id_conf": matched_id_conf, "violations": violations})
     for cls_id, boxes in boxes_by_class.items():
         if not boxes:
