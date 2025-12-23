@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -333,12 +332,7 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
     except Exception:
         cap = None
     try:
-        if cap is not None:
-            try:
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            except Exception:
-                pass
-        q = queue.Queue(maxsize=2)
+        q = queue.Queue(maxsize=8)
         STREAM_QUEUES[job_id] = q
         stop_event = threading.Event()
         STREAM_EVENTS[job_id] = stop_event
@@ -374,13 +368,21 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 sess.commit()
         except Exception:
             sess.rollback()
+        consecutive_no_frame = 0
+        max_no_frame_before_stop = 120
         while True:
             try:
                 if cap is None:
                     raise RuntimeError("cv2.VideoCapture failed to open file")
                 ret, frame = cap.read()
                 if not ret:
-                    break
+                    consecutive_no_frame += 1
+                    if consecutive_no_frame > max_no_frame_before_stop:
+                        break
+                    time.sleep(0.02)
+                    frame_idx += 1
+                    continue
+                consecutive_no_frame = 0
                 if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
                     small_w = 640
                     h, w = frame.shape[:2]
@@ -397,18 +399,13 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                         continue
                     meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
                     try:
-                        if q.full():
-                            try:
-                                q.get_nowait()
-                            except Exception:
-                                pass
-                        q.put_nowait((img_bytes, meta))
+                        q.put((img_bytes, meta), timeout=0.5)
                     except Exception:
                         pass
                 frame_idx += 1
             except Exception:
                 log.exception("frame loop error in process_video_file")
-                time.sleep(0.5)
+                time.sleep(0.2)
                 frame_idx += 1
                 continue
         stop_event.set()
@@ -416,7 +413,15 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             q.put_nowait(None)
         except Exception:
             pass
-        consumer_thread.join(timeout=1.0)
+        consumer_thread.join(timeout=60.0)
+        max_workers_val = int(os.environ.get("PROCESS_WORKERS", "3"))
+        try:
+            for _ in range(max_workers_val):
+                PROCESS_SEM.acquire()
+            for _ in range(max_workers_val):
+                PROCESS_SEM.release()
+        except Exception:
+            pass
         if job:
             try:
                 job.status = "completed"
@@ -427,17 +432,17 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
     except Exception:
         log.exception("process_video_file top-level error")
         try:
-            sess = SessionLocal()
+            sess2 = SessionLocal()
             try:
-                job = sess.query(Job).filter(Job.id == job_id).first()
+                job = sess2.query(Job).filter(Job.id == job_id).first()
                 if job:
                     job.status = "error"
                     job.finished_at = datetime.now(timezone.utc)
-                    sess.commit()
+                    sess2.commit()
             except Exception:
-                sess.rollback()
+                sess2.rollback()
             finally:
-                sess.close()
+                sess2.close()
         except Exception:
             pass
     finally:
@@ -448,6 +453,10 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             pass
         STREAM_QUEUES.pop(job_id, None)
         STREAM_EVENTS.pop(job_id, None)
+        try:
+            sess.close()
+        except Exception:
+            pass
 @app.post("/jobs/{job_id}/upload")
 async def upload_job_video(job_id: int, file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     INFER_REQUESTS.inc()
@@ -499,7 +508,7 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
                 pass
-        q = queue.Queue(maxsize=2)
+        q = queue.Queue(maxsize=8)
         STREAM_QUEUES[job_id] = q
         if stop_event is None:
             stop_event = threading.Event()
@@ -537,6 +546,8 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                     sess.commit()
         except Exception:
             sess.rollback()
+        consecutive_no_frame = 0
+        max_no_frame_before_stop = 120
         while True:
             try:
                 if stop_event is not None and stop_event.is_set():
@@ -548,8 +559,13 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                     continue
                 ret, frame = cap.read()
                 if not ret:
+                    consecutive_no_frame += 1
+                    if consecutive_no_frame > max_no_frame_before_stop:
+                        break
                     time.sleep(0.05)
+                    frame_idx += 1
                     continue
+                consecutive_no_frame = 0
                 if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
                     small_w = 640
                     h, w = frame.shape[:2]
@@ -566,12 +582,7 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                         continue
                     meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
                     try:
-                        if q.full():
-                            try:
-                                q.get_nowait()
-                            except Exception:
-                                pass
-                        q.put_nowait((img_bytes, meta))
+                        q.put((img_bytes, meta), timeout=0.5)
                     except Exception:
                         pass
                 frame_idx += 1
@@ -585,7 +596,15 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             q.put_nowait(None)
         except Exception:
             pass
-        consumer_thread.join(timeout=1.0)
+        consumer_thread.join(timeout=60.0)
+        max_workers_val = int(os.environ.get("PROCESS_WORKERS", "3"))
+        try:
+            for _ in range(max_workers_val):
+                PROCESS_SEM.acquire()
+            for _ in range(max_workers_val):
+                PROCESS_SEM.release()
+        except Exception:
+            pass
         if job:
             job.status = "completed"
             job.finished_at = datetime.now(timezone.utc)
@@ -791,7 +810,7 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
     finally:
         sess.close()
 @app.put("/violations/{violation_id}/status")
-def update_violation_status(violation_id: int, payload: dict = Body(...)):
+def update_violation_status(violation_id: int, payload: dict = Body(...), current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
         v = sess.query(Violation).filter(Violation.id == violation_id).first()
@@ -801,12 +820,21 @@ def update_violation_status(violation_id: int, payload: dict = Body(...)):
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
         try:
+            prev_status = (v.status or "").lower()
             v.status = new_status
             if new_status.lower() == "resolved":
                 try:
                     v.resolved_at = datetime.now(timezone.utc)
                 except Exception:
                     pass
+            if current_user:
+                if prev_status != (new_status or "").lower():
+                    v.manually_changed = True
+                    try:
+                        v.changed_by = getattr(current_user, "id", None)
+                        v.changed_at = datetime.now(timezone.utc)
+                    except Exception:
+                        pass
             sess.commit()
             sess.refresh(v)
         except Exception:

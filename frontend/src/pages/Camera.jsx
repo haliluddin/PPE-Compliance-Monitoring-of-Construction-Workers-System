@@ -1,4 +1,3 @@
-//frontend/src/pages/Camera.jsx
 import { FiUpload, FiCamera, FiSearch, FiMaximize2, FiVideo, FiWifi, FiAlertTriangle } from "react-icons/fi";
 import ImageCard from "../components/ImageCard";
 import { useState, useEffect, useRef } from "react";
@@ -19,6 +18,7 @@ export default function Camera() {
   const [addingCamera, setAddingCamera] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [selectedCameraJobId, setSelectedCameraJobId] = useState(null);
+  const [drawLabels, setDrawLabels] = useState(true);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -156,14 +156,13 @@ export default function Camera() {
     setCameras((prev) => {
       const removed = prev.find(c => String(c.job_id) === String(cameraJobId));
       if (removed && removed.videoUrl && removed.videoUrl.startsWith && removed.videoUrl.startsWith("blob:")) {
-        try { URL.revokeObjectURL(removed.videoUrl); } catch (e) { /* ignore */ }
+        try { URL.revokeObjectURL(removed.videoUrl); } catch (e) { }
       }
       return prev.filter((c) => String(c.job_id) !== String(cameraJobId));
     });
     if (selectedCameraJobId && String(selectedCameraJobId) === String(cameraJobId)) setSelectedCameraJobId(null);
   };
 
-  // get token helper (adjust to how you store token)
   const getAuthHeader = () => {
     const token = localStorage.getItem("access_token") || localStorage.getItem("token");
     return token ? { "Authorization": `Bearer ${token}` } : {};
@@ -176,7 +175,8 @@ export default function Camera() {
       meta: {
         title: opts.title ?? file?.name ?? `upload-${Date.now()}`,
         source: opts.source ?? "upload",
-        is_stream: !!opts.is_stream
+        is_stream: !!opts.is_stream,
+        draw_labels: drawLabels
       }
     };
     const headers = { "Content-Type": "application/json", ...getAuthHeader() };
@@ -196,7 +196,7 @@ export default function Camera() {
   const uploadJobVideo = async (jobId, file) => {
     const fd = new FormData();
     fd.append("file", file, file.name);
-    const headers = { ...getAuthHeader() }; // don't set Content-Type for FormData
+    const headers = { ...getAuthHeader() };
     const res = await fetch(`${API_BASE}/jobs/${jobId}/upload`, {
       method: "POST",
       headers,
@@ -208,7 +208,6 @@ export default function Camera() {
     }
     return await res.json();
   };
-
 
   const handleVideoUpload = async (event) => {
     const file = event.target.files?.[0];
@@ -222,7 +221,7 @@ export default function Camera() {
       frameSrc: null,
       latest_people: [],
       is_stream: false,
-      meta: { is_stream: false, title: file.name }
+      meta: { is_stream: false, title: file.name, draw_labels: drawLabels }
     };
     setCameras(prev => [...prev, tempCam]);
     let jobId;
@@ -241,7 +240,7 @@ export default function Camera() {
     }
   };
 
-  const createCameraOnServer = async ({ name, location, stream_url }) => {
+  const createCameraOnServer = async ({ name, location, stream_url, draw_labels }) => {
     const payload = { name, location, stream_url };
     const res = await fetch(`${API_BASE}/cameras`, {
       method: "POST",
@@ -255,12 +254,12 @@ export default function Camera() {
     return await res.json();
   };
 
-  const startStreamOnServer = async ({ stream_url, camera_id }) => {
+  const startStreamOnServer = async ({ stream_url, camera_id, draw_labels }) => {
     const headers = { "Content-Type": "application/json", ...getAuthHeader() };
     const res = await fetch(`${API_BASE}/streams`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ stream_url, camera_id })
+      body: JSON.stringify({ stream_url, camera_id, draw_labels })
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
@@ -269,7 +268,6 @@ export default function Camera() {
     return await res.json();
   };
 
-
   const handleAddCameraSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg("");
@@ -277,7 +275,7 @@ export default function Camera() {
     try {
       const camRes = await createCameraOnServer({ name: newCamName || `Camera`, location: newCamLocation || "", stream_url: newCamRtsp });
       const cameraId = camRes.camera_id ?? camRes.id;
-      const streamRes = await startStreamOnServer({ stream_url: newCamRtsp, camera_id: cameraId });
+      const streamRes = await startStreamOnServer({ stream_url: newCamRtsp, camera_id: cameraId, draw_labels });
       const jobId = streamRes.job_id ?? streamRes.jobId ?? null;
       const added = {
         job_id: jobId,
@@ -288,7 +286,7 @@ export default function Camera() {
         videoUrl: null,
         frameSrc: null,
         latest_people: [],
-        meta: { stream_url: newCamRtsp, is_stream: true }
+        meta: { stream_url: newCamRtsp, is_stream: true, draw_labels }
       };
       setCameras(prev => [...prev, added]);
       setShowAddModal(false);
@@ -323,7 +321,6 @@ export default function Camera() {
     }
   };
 
-
   const nonExpandableStatuses = ["PROCESSING", "UPLOADING", "IDLE", "STARTED", "UPLOAD_FAILED", "STOPPED"];
 
   const selectedCameraIndex = cameras.findIndex(c => String(c.job_id) === String(selectedCameraJobId));
@@ -347,6 +344,19 @@ export default function Camera() {
             </div>
           </div>
         ))}
+
+        <div className="bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg flex items-center justify-between">
+          <div>
+            <h3 className="text-gray-400 text-sm mb-1">Labels</h3>
+            <p className="text-white text-lg font-bold">{drawLabels ? "On" : "Off"}</p>
+          </div>
+          <div>
+            <button onClick={() => setDrawLabels(d => !d)} className="px-3 py-2 rounded bg-[#5388DF]">
+              Toggle
+            </button>
+          </div>
+        </div>
+
       </div>
 
       <div className="flex flex-col md:flex-row gap-4 mb-8">
@@ -459,7 +469,6 @@ export default function Camera() {
                 const annotatedFrame = cam.frameSrc || cam.latestAnnotatedThumb || null;
 
                 if (isUploadedVideo && !annotatedFrame) {
-                  // uploaded video (use video element and force reload when videoUrl changes)
                   return (
                     <video
                       key={String(cam.videoUrl) + "_video"}
@@ -473,10 +482,9 @@ export default function Camera() {
                 }
 
                 if (annotatedFrame) {
-                  // annotated frame (image) — key ensures it updates immediately when base64 changes
                   return (
                     <img
-                      key={String(annotatedFrame).slice(0,50)} // short key derived from src so updates reload
+                      key={String(annotatedFrame).slice(0,50)}
                       alt="annotated"
                       src={annotatedFrame}
                       className="object-contain w-full h-full"
@@ -485,7 +493,6 @@ export default function Camera() {
                 }
 
                 if (cam.videoUrl) {
-                  // fallback video
                   return (
                     <video
                       key={String(cam.videoUrl) + "_video2"}
@@ -525,6 +532,10 @@ export default function Camera() {
               <div>
                 <label className="block text-sm text-gray-300 mb-1">RTSP / Stream URL</label>
                 <input value={newCamRtsp} onChange={(e)=>setNewCamRtsp(e.target.value)} required className="w-full px-3 py-2 rounded bg-[#222227] text-gray-200 border border-gray-700" placeholder="rtsp://user:pass@ip:554/stream or http://192.168.1.64:8080/video" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-300">Show labels</label>
+                <button type="button" onClick={() => setDrawLabels(d => !d)} className="px-3 py-1 rounded bg-gray-700 text-white">{drawLabels ? "On" : "Off"}</button>
               </div>
               {errorMsg && <div className="text-sm text-red-400">{errorMsg}</div>}
               <div className="flex justify-end gap-2 mt-2">

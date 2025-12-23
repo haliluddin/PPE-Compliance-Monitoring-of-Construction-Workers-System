@@ -1,4 +1,3 @@
-# app/tasks.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -368,7 +367,8 @@ def _process_image(image_bytes, meta=None):
             ocr_reader = get_ocr_reader()
         except Exception:
             ocr_reader = None
-        result = process_frame(frame, triton_client=triton, triton_model_name=TRITON_MODEL, ocr_reader=ocr_reader, regset=set(), pose_instance=pose, person_boxes=person_boxes, triton_outputs=triton_out_for_ppe)
+        draw_labels_flag = True if meta.get("draw_labels", True) else False
+        result = process_frame(frame, triton_client=triton, triton_model_name=TRITON_MODEL, ocr_reader=ocr_reader, regset=set(), pose_instance=pose, person_boxes=person_boxes, triton_outputs=triton_out_for_ppe, draw_labels=draw_labels_flag)
         annotated = None
         if isinstance(result, dict) and "annotated_bgr" in result:
             annotated = result.pop("annotated_bgr")
@@ -481,7 +481,6 @@ else:
             log.exception("background _process_image failed")
 
     def process_image_task(*args, **kwargs):
-        """Schedule _process_image to run in a daemon thread and return immediately."""
         try:
             t = threading.Thread(target=_bg_wrapper, args=(args[0] if args else None, kwargs.get('meta') if kwargs else None), daemon=True)
             t.start()
@@ -492,4 +491,4 @@ else:
 
     
 def process_image(image_bytes, meta=None):
-    return _process_image(image_bytes, meta) 
+    return _process_image(image_bytes, meta)

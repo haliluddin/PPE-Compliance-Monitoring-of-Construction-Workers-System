@@ -1,4 +1,3 @@
-# app/router/reports.py
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, case
@@ -82,6 +81,18 @@ def get_reports_summary(
         .scalar() or 0
     )
 
+    false_positive_count = (
+        db.query(func.count(Violation.id))
+        .filter(base_filter, func.lower(func.coalesce(Violation.status, "")) == "false positive")
+        .scalar() or 0
+    )
+
+    manual_override_count = (
+        db.query(func.count(Violation.id))
+        .filter(base_filter, Violation.manually_changed == True)
+        .scalar() or 0
+    )
+
     total_violations = total_incidents
     violation_resolution_rate = round((resolved_count / total_violations) * 100, 2) if total_violations > 0 else 0
 
@@ -93,7 +104,6 @@ def get_reports_summary(
         .count()
     )
 
-    # Properly split and count individual violation types
     rows = db.query(Violation.violation_types).filter(base_filter).all()
     counter = Counter()
     for row in rows:
@@ -122,7 +132,7 @@ def get_reports_summary(
 
     camera_stats = (
         db.query(
-            Camera.name.label("location"),
+            Camera.location.label("location"),
             func.count(Violation.id).label("violations")
         )
         .outerjoin(Violation, and_(
@@ -131,7 +141,7 @@ def get_reports_summary(
             Violation.created_at >= start_utc,
             Violation.created_at < end_utc
         ))
-        .filter(Camera.user_id == user_id)
+        .filter((Camera.user_id == user_id) | (Camera.user_id == None))
         .group_by(Camera.id)
         .all()
     )
@@ -145,7 +155,7 @@ def get_reports_summary(
         else:
             risk = "Low"
         camera_data.append({
-            "location": c.location,
+            "location": c.location or "Unknown Location",
             "violations": c.violations,
             "risk": risk
         })
@@ -189,7 +199,9 @@ def get_reports_summary(
         "most_violations": most_violations,
         "top_offenders": top_offenders,
         "camera_data": camera_data,
-        "worker_data": worker_data
+        "worker_data": worker_data,
+        "false_positive_count": false_positive_count,
+        "manual_override_count": manual_override_count
     }
 
 

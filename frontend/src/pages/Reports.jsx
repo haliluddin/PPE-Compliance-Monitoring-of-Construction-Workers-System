@@ -1,4 +1,3 @@
-// frontend/src/pages/Reports.jsx
 import React, { useState, useEffect } from "react";
 import API from "../api";
 import { FiSearch, FiDownload, FiCheck } from "react-icons/fi";
@@ -13,6 +12,8 @@ export default function Reports() {
     total_workers_involved: 0,
     violation_resolution_rate: 0,
     high_risk_locations: 0,
+    false_positive_count: 0,
+    manual_override_count: 0
   });
   const [violationsData, setViolationsData] = useState([]);
   const [offendersData, setOffendersData] = useState([]);
@@ -44,6 +45,8 @@ export default function Reports() {
           total_workers_involved: response.data.total_workers_involved || 0,
           violation_resolution_rate: response.data.violation_resolution_rate || 0,
           high_risk_locations: response.data.high_risk_locations || 0,
+          false_positive_count: response.data.false_positive_count || 0,
+          manual_override_count: response.data.manual_override_count || 0
         });
 
         setViolationsData(response.data.most_violations || []);
@@ -150,7 +153,6 @@ export default function Reports() {
     window.print();
   };
 
-  // prepare ticks for performance charts: only dates that have data
   const performanceTicks = performanceData.map((p) => p.date);
 
   return (
@@ -214,7 +216,7 @@ export default function Reports() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-6">
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
               <h3 className="text-sm font-medium text-gray-400 mb-2">Total Incidents</h3>
               <p className="text-4xl font-bold text-[#5388DF]">{stats.total_incidents}</p>
@@ -230,6 +232,14 @@ export default function Reports() {
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
               <h3 className="text-sm font-medium text-gray-400 mb-2">High Risk Locations</h3>
               <p className="text-4xl font-bold text-red-500">{stats.high_risk_locations}</p>
+            </div>
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <h3 className="text-sm font-medium text-gray-400 mb-2">False Positives</h3>
+              <p className="text-4xl font-bold text-yellow-400">{stats.false_positive_count}</p>
+            </div>
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <h3 className="text-sm font-medium text-gray-400 mb-2">Manual Overrides</h3>
+              <p className="text-4xl font-bold text-indigo-400">{stats.manual_override_count}</p>
             </div>
           </div>
 

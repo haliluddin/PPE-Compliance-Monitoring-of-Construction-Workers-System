@@ -1,4 +1,3 @@
-# app/decision_logic.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -20,7 +19,7 @@ PPE_CLASS_IDS = [0, 1, 2, 3]
 VIS_THRESH = 0.3
 CROP_PAD = 0.12
 
-IMPORPER_GLOVE_OVERLAP_THRESH = 0.45
+IMPROPER_GLOVE_OVERLAP_THRESH = 0.45
 IMPROPER_GLOVE_OVERLAP_THRESH = 0.45
 IMPROPER_HELMET_HEAD_IOU_THRESH = 0.40
 HELMET_EYE_COVER_MARGIN = 5
@@ -420,7 +419,7 @@ def detect_torso(ocr_reader, crop, regset):
         return None, None, 0.0
     return best, best_txt, best_conf
 
-def process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=None, ocr_reader=None, regset=None, pose_instance=None, person_boxes=None):
+def process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=None, ocr_reader=None, regset=None, pose_instance=None, person_boxes=None, draw_labels=True):
     H, W = frame.shape[:2]
     if triton_outputs is None and triton_client is not None and triton_model_name is not None and input_name is not None and output_names is not None:
         img = cv2.resize(frame, (416, 416))
@@ -537,11 +536,25 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
             id_label = matched_id
         else:
             id_label = "UNID"
-        cv2.rectangle(annotated, (x1i, y1i), (x2i, y2i), (80, 200, 80), 2)
-        cv2.putText(annotated, f"ID:{id_label}", (x1i, max(12, y1i - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 2, cv2.LINE_AA)
-        ty = y2i + 18
-        for v in violations:
-            cv2.putText(annotated, v, (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 220), 2, cv2.LINE_AA); ty += 18
+        severity_color = (80, 200, 80)
+        vio_set = set([v.upper() for v in violations])
+        if not vio_set:
+            severity_color = (80, 200, 80)
+        else:
+            if len(vio_set) >= 2:
+                severity_color = (0, 0, 255)
+            elif vio_set == {"NO HELMET"}:
+                severity_color = (0, 140, 255)
+            elif vio_set == {"NO VEST"}:
+                severity_color = (0, 215, 255)
+            else:
+                severity_color = (0, 140, 255)
+        cv2.rectangle(annotated, (x1i, y1i), (x2i, y2i), severity_color, 2)
+        if draw_labels:
+            cv2.putText(annotated, f"ID:{id_label}", (x1i, max(12, y1i - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 2, cv2.LINE_AA)
+            ty = y2i + 18
+            for v in violations:
+                cv2.putText(annotated, v, (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 220), 2, cv2.LINE_AA); ty += 18
         people_results.append({"bbox": person_bbox, "id": id_label, "id_conf": matched_id_conf, "violations": violations})
     for cls_id, boxes in boxes_by_class.items():
         if not boxes:
@@ -555,8 +568,9 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                 x1b = max(0, min(x1b, W-1)); y1b = max(0, min(y1b, H-1))
                 x2b = max(0, min(x2b, W-1)); y2b = max(0, min(y2b, H-1))
                 cv2.rectangle(annotated, (x1b, y1b), (x2b, y2b), col, 2)
-                txt = f"{label}" + (f" {conf:.2f}" if conf is not None else "")
-                cv2.putText(annotated, txt, (x1b + 3, max(12, y1b + 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (240,240,240), 1, cv2.LINE_AA)
+                if draw_labels:
+                    txt = f"{label}" + (f" {conf:.2f}" if conf is not None else "")
+                    cv2.putText(annotated, txt, (x1b + 3, max(12, y1b + 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (240,240,240), 1, cv2.LINE_AA)
             except Exception:
                 continue
     result = {"frame_h": H, "frame_w": W, "boxes_by_class": boxes_by_class, "people": people_results, "annotated_bgr": annotated}

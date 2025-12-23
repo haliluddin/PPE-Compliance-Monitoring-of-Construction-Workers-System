@@ -70,7 +70,11 @@ class Violation(Base):
     inference = Column(JSON)
     status = Column(String, nullable=False, server_default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    resolved_at = Column(DateTime(timezone=True), nullable=True)   # <-- NEW column
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    # NEW fields for manual override tracking:
+    manually_changed = Column(Boolean, default=False, nullable=False)
+    changed_by = Column(Integer, nullable=True)  
+    changed_at = Column(DateTime(timezone=True), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     worker = relationship("Worker", back_populates="violations")
     user = relationship("User", back_populates="violations")

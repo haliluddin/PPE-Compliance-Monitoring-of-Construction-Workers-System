@@ -1,3 +1,4 @@
+// frontend/src/components/ViolationModal.jsx
 import React, { useState } from "react";
 import { FiX, FiUser, FiCamera, FiAlertTriangle, FiClock } from "react-icons/fi";
 import API from "../api";
