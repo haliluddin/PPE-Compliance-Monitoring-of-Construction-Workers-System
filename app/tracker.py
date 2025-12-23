@@ -2,7 +2,10 @@
 import time
 from threading import Lock
 from collections import defaultdict
-from datetime import datetime, timezone   # <-- added
+from datetime import datetime, timezone
+import logging
+
+log = logging.getLogger(__name__)
 
 class SimpleTracker:
     def __init__(self, iou_thresh=0.3, lost_frames_thresh=30, persist_K=3, persist_M=5):
@@ -26,6 +29,10 @@ class SimpleTracker:
             assignments = {}
             used = set()
             for bi, box in enumerate(boxes):
+                # if box is None, mark as not assigned (None)
+                if box is None:
+                    assignments[bi] = None
+                    continue
                 best_tid = None
                 best_iou = 0.0
                 for tid, t in self.tracks.items():
@@ -74,42 +81,70 @@ class SimpleTracker:
         return best
 
     def finalize_stale(self, frame_idx, sess):
-        to_remove = []
+        # Collect stale track IDs while holding the lock, but do DB ops outside lock
+        to_finalize = []
         with self.lock:
             for tid, t in list(self.tracks.items()):
                 if frame_idx - t["last_seen_frame"] > self.lost_frames_thresh and not t.get("finalized"):
-                    for vtype, vio_id in t.get("db_events", {}).items():
-                        try:
-                            from app.models import Violation
-                            vio = sess.query(Violation).filter(Violation.id == vio_id).first()
-                            if vio:
-                                sess.commit()
-                        except Exception:
-                            sess.rollback()
-                    t["finalized"] = True
-                    to_remove.append(tid)
-            for tid in to_remove:
+                    # mark as finalized to avoid double-processing
+                    self.tracks[tid]["finalized"] = True
+                    to_finalize.append(tid)
+
+        # Do DB commits / finalization outside the lock
+        for tid in to_finalize:
+            t = self.tracks.get(tid)
+            if not t:
+                continue
+            try:
+                for vtype, vio_id in t.get("db_events", {}).items():
+                    try:
+                        from app.models import Violation
+                        vio = sess.query(Violation).filter(Violation.id == vio_id).first()
+                        if vio:
+                            # commit if necessary (no changes here but keep DB consistent)
+                            sess.commit()
+                    except Exception:
+                        sess.rollback()
+            except Exception:
+                # continue with other tracks even if one fails
+                pass
+
+        # finally remove tracks from internal map (do under lock)
+        with self.lock:
+            for tid in to_finalize:
                 try:
                     self.tracks.pop(tid, None)
                 except Exception:
                     pass
 
     def update_tracks(self, people, frame_idx, frame_ts, annotated_snapshot, sess, job_id=None, camera_id=None, job_user_id=None):
+        # Build boxes list where missing/invalid boxes are None (do not use degenerate (0,0,0,0))
         boxes = []
         for p in people:
             b = p.get("bbox")
-            if b is None:
-                boxes.append((0,0,0,0))
+            if not b or len(b) < 4:
+                boxes.append(None)
             else:
-                boxes.append(tuple([float(x) for x in b]))
+                try:
+                    x1, y1, x2, y2 = [float(x) for x in b[:4]]
+                    if x2 <= x1 or y2 <= y1:
+                        boxes.append(None)
+                    else:
+                        boxes.append((x1, y1, x2, y2))
+                except Exception:
+                    boxes.append(None)
+
         assignments = self.match_boxes(boxes, frame_idx)
         results = []
         with self.lock:
             for bi, p in enumerate(people):
                 tid = assignments.get(bi)
                 if tid is None:
+                    # no assignment for this person (no bbox)
                     continue
                 track = self.tracks.get(tid)
+                if track is None:
+                    continue
                 viols = set(p.get("violations", []))
                 id_label = p.get("id")
                 id_conf = p.get("id_conf", 0.0) if isinstance(p.get("id_conf", None), (int,float)) else 0.0
@@ -238,6 +273,7 @@ class SimpleTracker:
                                         sess.rollback()
 
                 results.append({"track_id": tid, "best_id": best_id, "violations": list(viols)})
+        # finalize stale tracks (collects and performs DB work safely)
         self.finalize_stale(frame_idx, sess)
         return results
 

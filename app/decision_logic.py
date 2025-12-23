@@ -1,3 +1,4 @@
+# app/decision_logic.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -12,14 +13,22 @@ import time
 import numpy as np
 import threading
 from collections import defaultdict
-from tritonclient.http import InferInput, InferRequestedOutput
 from threading import Lock
+import logging
+
+log = logging.getLogger(__name__)
+
+# Triton client helpers may not be installed in all environments.
+try:
+    from tritonclient.http import InferInput, InferRequestedOutput
+except Exception:
+    InferInput = None
+    InferRequestedOutput = None
 
 PPE_CLASS_IDS = [0, 1, 2, 3]
 VIS_THRESH = 0.3
 CROP_PAD = 0.12
 
-IMPROPER_GLOVE_OVERLAP_THRESH = 0.45
 IMPROPER_GLOVE_OVERLAP_THRESH = 0.45
 IMPROPER_HELMET_HEAD_IOU_THRESH = 0.40
 HELMET_EYE_COVER_MARGIN = 5
@@ -421,15 +430,27 @@ def detect_torso(ocr_reader, crop, regset):
 
 def process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=None, ocr_reader=None, regset=None, pose_instance=None, person_boxes=None, draw_labels=True):
     H, W = frame.shape[:2]
-    if triton_outputs is None and triton_client is not None and triton_model_name is not None and input_name is not None and output_names is not None:
-        img = cv2.resize(frame, (416, 416))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype("float32") / 255.0
-        img = np.transpose(img, (2, 0, 1))[None, ...]
-        inp = InferInput(input_name, img.shape, "FP32")
-        inp.set_data_from_numpy(img)
-        outputs = [InferRequestedOutput(n) for n in output_names]
-        res = triton_client.infer(triton_model_name, inputs=[inp], outputs=outputs)
-        triton_outputs = {n: res.as_numpy(n) for n in output_names}
+
+    # If caller didn't provide triton_outputs but we have a triton client and model metadata,
+    # attempt Triton inference — but only if InferInput helpers are available.
+    if (triton_outputs is None and triton_client is not None and triton_model_name is not None and input_name is not None and output_names is not None):
+        if InferInput is None or InferRequestedOutput is None:
+            log.warning("Triton helpers not available — skipping Triton inference in decision_logic.process_frame")
+            triton_outputs = None
+        else:
+            try:
+                img = cv2.resize(frame, (416, 416))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype("float32") / 255.0
+                img = np.transpose(img, (2, 0, 1))[None, ...]
+                inp = InferInput(input_name, img.shape, "FP32")
+                inp.set_data_from_numpy(img)
+                outputs = [InferRequestedOutput(n) for n in output_names]
+                res = triton_client.infer(triton_model_name, inputs=[inp], outputs=outputs)
+                triton_outputs = {n: res.as_numpy(n) for n in output_names}
+            except Exception:
+                log.exception("Triton inference failed in process_frame; falling back to local parsing")
+                triton_outputs = None
+
     boxes_by_class, parsed_people = parse_triton_outputs(triton_outputs, H, W)
     if person_boxes is None:
         person_boxes = parsed_people
@@ -458,7 +479,11 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         matched_id_conf = 0.0
         if res_pose and getattr(res_pose, "pose_landmarks", None):
             draw_pose(annotated, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
-            flags = check_ppe(boxes_by_class, person_bbox, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
+            try:
+                flags = check_ppe(boxes_by_class, person_bbox, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
+            except Exception:
+                log.exception("check_ppe failed")
+                flags = {}
             if not flags.get("helmet", False):
                 violations.append("NO HELMET")
             else:
@@ -508,30 +533,40 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                 except Exception:
                     torso = None
                 if torso is not None and torso.size > 0:
-                    mid, txt, conf = detect_torso(ocr_reader, torso, regset or set())
-                    if mid is not None:
-                        matched_id = mid
-                        try:
-                            matched_id_conf = float(conf) if conf is not None else 0.0
-                        except Exception:
-                            matched_id_conf = 0.0
+                    try:
+                        mid, txt, conf = detect_torso(ocr_reader, torso, regset or set())
+                        if mid is not None:
+                            matched_id = mid
+                            try:
+                                matched_id_conf = float(conf) if conf is not None else 0.0
+                            except Exception:
+                                matched_id_conf = 0.0
+                    except Exception:
+                        log.exception("detect_torso failed")
         else:
             vest_boxes = boxes_by_class.get(3, [])
             helmet_boxes = boxes_by_class.get(1, [])
-            if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.03 for (bx1, by1, bx2, by2, _) in vest_boxes):
-                violations.append("NO VEST")
-            if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.02 for (bx1, by1, bx2, by2, _) in helmet_boxes):
-                violations.append("NO HELMET")
+            try:
+                if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.03 for (bx1, by1, bx2, by2, _) in vest_boxes):
+                    violations.append("NO VEST")
+                if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.02 for (bx1, by1, bx2, by2, _) in helmet_boxes):
+                    violations.append("NO HELMET")
+            except Exception:
+                log.exception("fallback bbox checks failed")
             if ocr_reader is not None:
                 pc = frame[int(person_bbox[1]):int(person_bbox[3]), int(person_bbox[0]):int(person_bbox[2])]
                 if pc.size > 0:
-                    mid, txt, conf = detect_torso(ocr_reader, pc, regset or set())
-                    if mid is not None:
-                        matched_id = mid
-                        try:
-                            matched_id_conf = float(conf) if conf is not None else 0.0
-                        except Exception:
-                            matched_id_conf = 0.0
+                    try:
+                        mid, txt, conf = detect_torso(ocr_reader, pc, regset or set())
+                        if mid is not None:
+                            matched_id = mid
+                            try:
+                                matched_id_conf = float(conf) if conf is not None else 0.0
+                            except Exception:
+                                matched_id_conf = 0.0
+                    except Exception:
+                        log.exception("detect_torso fallback failed")
+
         if matched_id is not None:
             id_label = matched_id
         else:
