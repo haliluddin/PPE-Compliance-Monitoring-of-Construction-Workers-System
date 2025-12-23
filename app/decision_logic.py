@@ -1,4 +1,3 @@
-# app/decision_logic.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -18,7 +17,6 @@ import logging
 
 log = logging.getLogger(__name__)
 
-# Triton client helpers may not be installed in all environments.
 try:
     from tritonclient.http import InferInput, InferRequestedOutput
 except Exception:
@@ -443,9 +441,6 @@ def detect_torso(ocr_reader, crop, regset):
 
 def process_frame(frame, triton_client=None, triton_model_name=None, input_name=None, output_names=None, triton_outputs=None, ocr_reader=None, regset=None, pose_instance=None, person_boxes=None, draw_labels=True):
     H, W = frame.shape[:2]
-
-    # If caller didn't provide triton_outputs but we have a triton client and model metadata,
-    # attempt Triton inference — but only if InferInput helpers are available.
     if (triton_outputs is None and triton_client is not None and triton_model_name is not None and input_name is not None and output_names is not None):
         if InferInput is None or InferRequestedOutput is None:
             log.warning("Triton helpers not available — skipping Triton inference in decision_logic.process_frame")
@@ -491,7 +486,8 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         matched_id = None
         matched_id_conf = 0.0
         if res_pose and getattr(res_pose, "pose_landmarks", None):
-            draw_pose(annotated, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
+            if draw_labels:
+                draw_pose(annotated, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
             try:
                 flags = check_ppe(boxes_by_class, person_bbox, res_pose.pose_landmarks, x1i, y1i, x2i - x1i, y2i - y1i)
             except Exception:
@@ -559,11 +555,49 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         else:
             vest_boxes = boxes_by_class.get(3, [])
             helmet_boxes = boxes_by_class.get(1, [])
+            glove_boxes = boxes_by_class.get(0, [])
+            shoe_boxes = boxes_by_class.get(2, [])
             try:
                 if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.03 for (bx1, by1, bx2, by2, _) in vest_boxes):
                     violations.append("NO VEST")
                 if not any(iou(person_bbox, (bx1, by1, bx2, by2)) > 0.02 for (bx1, by1, bx2, by2, _) in helmet_boxes):
                     violations.append("NO HELMET")
+                cx = (person_bbox[0] + person_bbox[2]) / 2.0
+                left_glove_present = False
+                right_glove_present = False
+                for bx in glove_boxes:
+                    try:
+                        bx_xc = (bx[0] + bx[2]) / 2.0
+                        if iou(person_bbox, (bx[0], bx[1], bx[2], bx[3])) > 0.02:
+                            if bx_xc < cx:
+                                left_glove_present = True
+                            else:
+                                right_glove_present = True
+                    except Exception:
+                        continue
+                if not left_glove_present:
+                    violations.append("NO LEFT GLOVE")
+                if not right_glove_present:
+                    violations.append("NO RIGHT GLOVE")
+                left_shoe_present = False
+                right_shoe_present = False
+                ph = person_bbox[3] - person_bbox[1]
+                bottom_y_threshold = person_bbox[1] + ph * 0.45
+                for bx in shoe_boxes:
+                    try:
+                        bx_xc = (bx[0] + bx[2]) / 2.0
+                        bx_yc = (bx[1] + bx[3]) / 2.0
+                        if iou(person_bbox, (bx[0], bx[1], bx[2], bx[3])) > 0.02 and bx_yc >= bottom_y_threshold:
+                            if bx_xc < cx:
+                                left_shoe_present = True
+                            else:
+                                right_shoe_present = True
+                    except Exception:
+                        continue
+                if not left_shoe_present:
+                    violations.append("NO LEFT SHOE")
+                if not right_shoe_present:
+                    violations.append("NO RIGHT SHOE")
             except Exception:
                 log.exception("fallback bbox checks failed")
             if ocr_reader is not None:
@@ -585,36 +619,25 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
         else:
             id_label = "UNID"
 
-        # Determine bounding-box color based on violations per user's rules:
-        # - RED: 100% violation (no helmet, no vest, no right glove, no left glove, no left shoe, no right shoe)
-        # - GREEN: no violations
-        # - ORANGE: any violation list that contains "NO HELMET" (but not the 100% set above)
-        # - YELLOW: any other non-empty violation list that does NOT contain "NO HELMET"
         full_viols = {"NO HELMET", "NO VEST", "NO RIGHT GLOVE", "NO LEFT GLOVE", "NO LEFT SHOE", "NO RIGHT SHOE"}
         vio_set = {v.upper() for v in violations}
-
-        # Defaults
-        severity_color = (80, 200, 80)  # green-ish for no violations
-
+        severity_color = (80, 200, 80)
         if vio_set:
-            # Check full 100% violation first
             if full_viols.issubset(vio_set):
-                # RED (BGR)
                 severity_color = (0, 0, 255)
             elif "NO HELMET" in vio_set:
-                # ORANGE (BGR) -- approximate orange
                 severity_color = (0, 165, 255)
             else:
-                # YELLOW (BGR)
                 severity_color = (0, 255, 255)
         else:
             severity_color = (80, 200, 80)
 
-        # Draw bbox and labels
-        cv2.rectangle(annotated, (x1i, y1i), (x2i, y2i), severity_color, 2)
         if draw_labels:
-            cv2.putText(annotated, f"ID:{id_label}", (x1i, max(12, y1i - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 2, cv2.LINE_AA)
-            # draw all detected violations (one per line) — preserve original order but normalize display to uppercase
+            cv2.rectangle(annotated, (x1i, y1i), (x2i, y2i), severity_color, 2)
+            try:
+                cv2.putText(annotated, f"ID:{id_label}", (x1i, max(12, y1i - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 2, cv2.LINE_AA)
+            except Exception:
+                pass
             ty = y2i + 18
             if violations:
                 for v in violations:
@@ -624,7 +647,10 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                     except Exception:
                         ty += 18
             else:
-                cv2.putText(annotated, "NO VIOLATION", (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 220, 20), 2, cv2.LINE_AA)
+                try:
+                    cv2.putText(annotated, "NO VIOLATION", (x1i + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 220, 20), 2, cv2.LINE_AA)
+                except Exception:
+                    pass
 
         people_results.append({"bbox": person_bbox, "id": id_label, "id_conf": matched_id_conf, "violations": violations})
     for cls_id, boxes in boxes_by_class.items():
@@ -638,10 +664,13 @@ def process_frame(frame, triton_client=None, triton_model_name=None, input_name=
                 conf = float(bx[4]) if len(bx) > 4 else None
                 x1b = max(0, min(x1b, W-1)); y1b = max(0, min(y1b, H-1))
                 x2b = max(0, min(x2b, W-1)); y2b = max(0, min(y2b, H-1))
-                cv2.rectangle(annotated, (x1b, y1b), (x2b, y2b), col, 2)
                 if draw_labels:
-                    txt = f"{label}" + (f" {conf:.2f}" if conf is not None else "")
-                    cv2.putText(annotated, txt, (x1b + 3, max(12, y1b + 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (240,240,240), 1, cv2.LINE_AA)
+                    cv2.rectangle(annotated, (x1b, y1b), (x2b, y2b), col, 2)
+                    try:
+                        txt = f"{label}" + (f" {conf:.2f}" if conf is not None else "")
+                        cv2.putText(annotated, txt, (x1b + 3, max(12, y1b + 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (240,240,240), 1, cv2.LINE_AA)
+                    except Exception:
+                        pass
             except Exception:
                 continue
     result = {"frame_h": H, "frame_w": W, "boxes_by_class": boxes_by_class, "people": people_results, "annotated_bgr": annotated}

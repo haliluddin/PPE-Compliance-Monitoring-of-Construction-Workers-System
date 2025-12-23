@@ -1,4 +1,3 @@
-# app/tracker.py
 import time
 from threading import Lock
 from collections import defaultdict
@@ -29,13 +28,14 @@ class SimpleTracker:
             assignments = {}
             used = set()
             for bi, box in enumerate(boxes):
-                # if box is None, mark as not assigned (None)
                 if box is None:
                     assignments[bi] = None
                     continue
                 best_tid = None
                 best_iou = 0.0
                 for tid, t in self.tracks.items():
+                    if tid in used:
+                        continue
                     if frame_idx - t["last_seen_frame"] > self.lost_frames_thresh:
                         continue
                     i = self.iou(box, t["bbox"])
@@ -81,16 +81,12 @@ class SimpleTracker:
         return best
 
     def finalize_stale(self, frame_idx, sess):
-        # Collect stale track IDs while holding the lock, but do DB ops outside lock
         to_finalize = []
         with self.lock:
             for tid, t in list(self.tracks.items()):
                 if frame_idx - t["last_seen_frame"] > self.lost_frames_thresh and not t.get("finalized"):
-                    # mark as finalized to avoid double-processing
                     self.tracks[tid]["finalized"] = True
                     to_finalize.append(tid)
-
-        # Do DB commits / finalization outside the lock
         for tid in to_finalize:
             t = self.tracks.get(tid)
             if not t:
@@ -101,15 +97,11 @@ class SimpleTracker:
                         from app.models import Violation
                         vio = sess.query(Violation).filter(Violation.id == vio_id).first()
                         if vio:
-                            # commit if necessary (no changes here but keep DB consistent)
                             sess.commit()
                     except Exception:
                         sess.rollback()
             except Exception:
-                # continue with other tracks even if one fails
                 pass
-
-        # finally remove tracks from internal map (do under lock)
         with self.lock:
             for tid in to_finalize:
                 try:
@@ -118,7 +110,6 @@ class SimpleTracker:
                     pass
 
     def update_tracks(self, people, frame_idx, frame_ts, annotated_snapshot, sess, job_id=None, camera_id=None, job_user_id=None):
-        # Build boxes list where missing/invalid boxes are None (do not use degenerate (0,0,0,0))
         boxes = []
         for p in people:
             b = p.get("bbox")
@@ -133,14 +124,12 @@ class SimpleTracker:
                         boxes.append((x1, y1, x2, y2))
                 except Exception:
                     boxes.append(None)
-
         assignments = self.match_boxes(boxes, frame_idx)
         results = []
         with self.lock:
             for bi, p in enumerate(people):
                 tid = assignments.get(bi)
                 if tid is None:
-                    # no assignment for this person (no bbox)
                     continue
                 track = self.tracks.get(tid)
                 if track is None:
@@ -169,13 +158,10 @@ class SimpleTracker:
                         worker_obj = sess.query(Worker).filter(Worker.worker_code == worker_code).first() if worker_code else None
                     except Exception:
                         worker_obj = None
-
-                # Unified violation handling (single DB event for simultaneous violations)
                 persistent_new = set(v for v in viols if v not in track["started_events"] and self._should_start_violation(track, v))
                 current_viols = set(viols)
                 existing_ids = set(track["db_events"].get(v) for v in current_viols if track["db_events"].get(v) is not None)
                 existing_id = next(iter(existing_ids), None)
-
                 def _update_violation_row(vio_id, types_list):
                     try:
                         from app.models import Violation
@@ -193,16 +179,13 @@ class SimpleTracker:
                     except Exception:
                         sess.rollback()
                         return None
-
                 if persistent_new:
                     try:
                         from app.models import Violation, Notification
                         snap_bytes = annotated_snapshot
                         inference_json = {"person": p}
                         should_save = True if worker_obj is not None and getattr(worker_obj, "registered", True) else False
-
                         full_types = sorted(list(current_viols)) if current_viols else sorted(list(persistent_new))
-
                         if existing_id:
                             updated_id = _update_violation_row(existing_id, full_types)
                             if updated_id:
@@ -210,7 +193,6 @@ class SimpleTracker:
                                     track["db_events"][vt] = updated_id
                         else:
                             if should_save:
-                                # Ensure frame_ts is timezone-aware; we assume tasks passes tz-aware UTC
                                 vio = Violation(
                                     job_id=job_id,
                                     camera_id=camera_id,
@@ -229,8 +211,6 @@ class SimpleTracker:
                                 sess.refresh(vio)
                                 for vt in full_types:
                                     track["db_events"][vt] = vio.id
-
-                                # create notification with timezone-aware created_at (use frame_ts if provided else now UTC)
                                 try:
                                     created_at_val = frame_ts if frame_ts is not None else datetime.now(timezone.utc)
                                     notif = Notification(
@@ -244,9 +224,7 @@ class SimpleTracker:
                                     sess.commit()
                                 except Exception:
                                     sess.rollback()
-
                         track["started_events"].update(current_viols)
-
                     except Exception:
                         sess.rollback()
                 else:
@@ -271,9 +249,7 @@ class SimpleTracker:
                                             sess.commit()
                                     except Exception:
                                         sess.rollback()
-
                 results.append({"track_id": tid, "best_id": best_id, "violations": list(viols)})
-        # finalize stale tracks (collects and performs DB work safely)
         self.finalize_stale(frame_idx, sess)
         return results
 

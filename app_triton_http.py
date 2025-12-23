@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -53,7 +52,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# try to include routers if available (keep original behavior)
 try:
     from app.router.auth import router as auth_router
     app.include_router(auth_router)
@@ -110,21 +108,15 @@ FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
 PH_TZ = timezone(timedelta(hours=8))
 
-# ----- Pipeline sizing and workers/semaphore setup -----
 from concurrent.futures import ThreadPoolExecutor
 
-# Number of processing worker threads used to run process_image
 PROCESS_WORKERS = int(os.environ.get("PROCESS_WORKERS", "3"))
-# Max queue size per stream job (increases tolerance to bursts)
 STREAM_QUEUE_MAXSIZE = int(os.environ.get("STREAM_QUEUE_MAXSIZE", "32"))
 
-# Executor and semaphore must be in sync: semaphore initial count should equal number of workers
 PROCESS_EXECUTOR = ThreadPoolExecutor(max_workers=PROCESS_WORKERS)
 PROCESS_SEM = threading.BoundedSemaphore(PROCESS_WORKERS)
 
-# Helper: try opening a capture with warmup attempts (helps RTSP / flaky backends)
 def try_open_capture(source, wait_seconds=8, sleep_step=0.25):
-    """Try to open cv2.VideoCapture(source) and wait until it becomes available or timeout."""
     start = time.time()
     try:
         cap = cv2.VideoCapture(source)
@@ -136,7 +128,6 @@ def try_open_capture(source, wait_seconds=8, sleep_step=0.25):
                 return cap
         except Exception:
             pass
-        # Try a single read to coax some backends
         try:
             if cap is not None:
                 ret, _ = cap.read()
@@ -160,9 +151,6 @@ def try_open_capture(source, wait_seconds=8, sleep_step=0.25):
     except Exception:
         pass
     return cap
-
-# End of pipeline sizing and helpers
-# --------------------------------------------------------
 
 try:
     from app.router.auth import router as auth_router_dup
@@ -402,17 +390,14 @@ def _submit_processing(img_bytes, meta):
 def process_video_file(job_id: int, filepath: str, camera_id=None):
     cap = None
     try:
-        # Use the helper to give VideoCapture a chance to initialize (useful for some backends)
         cap = try_open_capture(filepath, wait_seconds=6)
     except Exception:
         cap = None
-
     try:
         q = queue.Queue(maxsize=STREAM_QUEUE_MAXSIZE)
         STREAM_QUEUES[job_id] = q
         stop_event = threading.Event()
         STREAM_EVENTS[job_id] = stop_event
-
         def consumer():
             while not stop_event.is_set():
                 try:
@@ -422,7 +407,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 if item is None:
                     break
                 img_bytes, meta = item
-                # try to acquire a processing slot with a small timeout instead of skipping immediately
                 try:
                     acquired = PROCESS_SEM.acquire(timeout=2.0)
                 except Exception:
@@ -437,7 +421,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                         PROCESS_SEM.release()
                     except Exception:
                         pass
-
         consumer_thread = threading.Thread(target=consumer, daemon=True)
         consumer_thread.start()
         frame_idx = 0
@@ -456,7 +439,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
         while True:
             try:
                 if cap is None or not getattr(cap, "isOpened", lambda: False)():
-                    # If capture is not available, count as no-frame and allow retry a bit
                     consecutive_no_frame += 1
                     if consecutive_no_frame > max_no_frame_before_stop:
                         log.warning("process_video_file: no frames from capture, stopping job %s", job_id)
@@ -464,7 +446,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                     time.sleep(0.02)
                     frame_idx += 1
                     continue
-
                 ret, frame = cap.read()
                 if not ret:
                     consecutive_no_frame += 1
@@ -475,7 +456,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                     frame_idx += 1
                     continue
                 consecutive_no_frame = 0
-
                 if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
                     small_w = 640
                     h, w = frame.shape[:2]
@@ -490,11 +470,17 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                     except Exception:
                         frame_idx += 1
                         continue
-                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                    try:
+                        job_draw_labels = True
+                        if job is not None:
+                            jm = job.meta or {}
+                            job_draw_labels = bool(jm.get("draw_labels", True))
+                    except Exception:
+                        job_draw_labels = True
+                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time(), "draw_labels": job_draw_labels}
                     try:
                         q.put((img_bytes, meta), timeout=1.0)
                     except Exception:
-                        # queue full or other error: log and drop frame instead of silent ignore
                         log.warning("process_video_file: dropped frame (queue full) for job %s frame_idx %s", job_id, frame_idx)
                 frame_idx += 1
             except Exception:
@@ -502,16 +488,12 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 time.sleep(0.2)
                 frame_idx += 1
                 continue
-
         stop_event.set()
         try:
             q.put_nowait(None)
         except Exception:
             pass
-
         consumer_thread.join(timeout=60.0)
-
-        # Wait for outstanding tasks to finish up to a bounded timeout
         wait_start = time.time()
         wait_timeout = int(os.environ.get("PROCESS_FINISH_WAIT_SECS", "30"))
         needed = PROCESS_WORKERS
@@ -529,21 +511,18 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                     all_acquired = False
                     break
             if all_acquired:
-                # Release any we acquired and break
                 for _ in acquired_list:
                     try:
                         PROCESS_SEM.release()
                     except Exception:
                         pass
                 break
-            # Release any partial acquires
             for _ in acquired_list:
                 try:
                     PROCESS_SEM.release()
                 except Exception:
                     pass
             time.sleep(0.5)
-
         if job:
             try:
                 job.status = "completed"
@@ -551,7 +530,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                 sess.commit()
             except Exception:
                 sess.rollback()
-
     except Exception:
         log.exception("process_video_file top-level error")
         try:
@@ -621,6 +599,7 @@ class StreamStart(BaseModel):
     stream_url: str
     camera_id: int = None
     job_id: int = None
+    draw_labels: bool = True
 
 def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threading.Event = None):
     cap = None
@@ -634,7 +613,6 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
                 pass
-
         q = queue.Queue(maxsize=STREAM_QUEUE_MAXSIZE)
         STREAM_QUEUES[job_id] = q
         if stop_event is None:
@@ -643,7 +621,6 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
         frame_idx = 0
         sess = SessionLocal()
         job = None
-
         def consumer():
             while not stop_event.is_set():
                 try:
@@ -667,10 +644,8 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                         PROCESS_SEM.release()
                     except Exception:
                         pass
-
         consumer_thread = threading.Thread(target=consumer, daemon=True)
         consumer_thread.start()
-
         try:
             if job_id:
                 job = sess.query(Job).filter(Job.id == job_id).first()
@@ -680,16 +655,13 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                     sess.commit()
         except Exception:
             sess.rollback()
-
         consecutive_no_frame = 0
         max_no_frame_before_stop = 120
-
         while True:
             try:
                 if stop_event is not None and stop_event.is_set():
                     break
                 if cap is None or not getattr(cap, "isOpened", lambda: False)():
-                    # log and wait a bit; allow retries
                     consecutive_no_frame += 1
                     if consecutive_no_frame > max_no_frame_before_stop:
                         log.warning("stream_loop: capture not opened for stream %s (job %s); stopping", rtsp_url, job_id)
@@ -697,7 +669,6 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                     time.sleep(1.0)
                     frame_idx += 1
                     continue
-
                 ret, frame = cap.read()
                 if not ret:
                     consecutive_no_frame += 1
@@ -708,7 +679,6 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                     frame_idx += 1
                     continue
                 consecutive_no_frame = 0
-
                 if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
                     small_w = 640
                     h, w = frame.shape[:2]
@@ -723,7 +693,14 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                     except Exception:
                         frame_idx += 1
                         continue
-                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time()}
+                    try:
+                        job_draw_labels = True
+                        if job is not None:
+                            jm = job.meta or {}
+                            job_draw_labels = bool(jm.get("draw_labels", True))
+                    except Exception:
+                        job_draw_labels = True
+                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time(), "draw_labels": job_draw_labels}
                     try:
                         q.put((img_bytes, meta), timeout=1.0)
                     except Exception:
@@ -734,16 +711,12 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                 time.sleep(0.5)
                 frame_idx += 1
                 continue
-
         stop_event.set()
         try:
             q.put_nowait(None)
         except Exception:
             pass
-
         consumer_thread.join(timeout=60.0)
-
-        # Wait for outstanding tasks similar to process_video_file
         wait_start = time.time()
         wait_timeout = int(os.environ.get("PROCESS_FINISH_WAIT_SECS", "30"))
         needed = PROCESS_WORKERS
@@ -773,12 +746,10 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
                 except Exception:
                     pass
             time.sleep(0.5)
-
         if job:
             job.status = "completed"
             job.finished_at = datetime.now(timezone.utc)
             sess.commit()
-
     except Exception:
         log.exception("stream_loop top-level error")
         try:
@@ -816,7 +787,8 @@ def start_stream(payload: StreamStart, current_user=Depends(get_current_user)):
     if job_id is None:
         sess = SessionLocal()
         try:
-            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta={"stream_url": rtsp_url}, user_id=getattr(current_user, "id", None))
+            job_meta = {"stream_url": rtsp_url, "draw_labels": bool(getattr(payload, "draw_labels", True))}
+            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta=job_meta, user_id=getattr(current_user, "id", None))
             sess.add(job)
             sess.commit()
             sess.refresh(job)
