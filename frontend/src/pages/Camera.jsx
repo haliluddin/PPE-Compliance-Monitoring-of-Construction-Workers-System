@@ -346,18 +346,6 @@ export default function Camera() {
           </div>
         ))}
 
-        <div className="bg-[#2A2B30] px-5 py-3 rounded-xl shadow-lg flex items-center justify-between">
-          <div>
-            <h3 className="text-gray-400 text-sm mb-1">Labels</h3>
-            <p className="text-white text-lg font-bold">{drawLabels ? "On" : "Off"}</p>
-          </div>
-          <div>
-            <button onClick={() => setDrawLabels(d => !d)} className="px-3 py-2 rounded bg-[#5388DF]">
-              Toggle
-            </button>
-          </div>
-        </div>
-
       </div>
 
       <div className="flex flex-col md:flex-row gap-4 mb-8">
@@ -409,6 +397,10 @@ export default function Camera() {
         <div className="flex items-center gap-2 bg-red-100 text-red-700 px-4 py-2 rounded-lg text-sm font-medium">
           <span className="w-3 h-3 rounded-full bg-red-500"></span>
           Non-Compliance
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-300">Show labels</label>
+          <button type="button" onClick={() => setDrawLabels(d => !d)} className="px-3 py-1 rounded bg-gray-700 text-white">{drawLabels ? "On" : "Off"}</button>
         </div>
       </section>
 
