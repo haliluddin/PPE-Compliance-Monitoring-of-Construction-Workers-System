@@ -1,15 +1,15 @@
+# app/router/violations.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Violation, Worker, User, Camera, Notification
+from app.models import Violation, Worker, Camera, Notification, User
 from app.router.auth import get_current_user
 from app.router.notifications_ws import broadcast_notification
-from app.schemas import ViolationCreate
+import base64
 import asyncio
 from datetime import datetime, timezone
-import base64
-
-PH_TZ = timezone(timedelta(hours=8)) if 'timedelta' in globals() else timezone.utc
+from collections import defaultdict
+import base64 as _b64
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
 
@@ -41,7 +41,7 @@ def get_violations(db: Session = Depends(get_db), current_user: User = Depends(g
         snap_b64 = None
         if v.Violation.snapshot:
             try:
-                snap_b64 = base64.b64encode(v.Violation.snapshot).decode("ascii")
+                snap_b64 = _b64.b64encode(v.Violation.snapshot).decode("ascii")
             except Exception:
                 snap_b64 = None
         camera_display = _format_camera_display(v.camera_name, v.camera_location)
@@ -49,9 +49,9 @@ def get_violations(db: Session = Depends(get_db), current_user: User = Depends(g
         if getattr(v.Violation, "created_at", None):
             try:
                 if v.Violation.created_at.tzinfo is None:
-                    created_at_iso = v.Violation.created_at.replace(tzinfo=timezone.utc).astimezone(PH_TZ).isoformat()
+                    created_at_iso = v.Violation.created_at.replace(tzinfo=timezone.utc).astimezone(timezone.utc).isoformat()
                 else:
-                    created_at_iso = v.Violation.created_at.astimezone(PH_TZ).isoformat()
+                    created_at_iso = v.Violation.created_at.astimezone(timezone.utc).isoformat()
             except Exception:
                 created_at_iso = v.Violation.created_at.isoformat()
         out.append({
@@ -69,15 +69,15 @@ def get_violations(db: Session = Depends(get_db), current_user: User = Depends(g
     return out
 
 @router.post("/")
-def create_violation(violation: ViolationCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_violation(violation: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     frame_ts_val = None
-    if violation.frame_ts:
+    if violation.get("frame_ts"):
         try:
             try:
-                frame_ts_val = datetime.fromisoformat(str(violation.frame_ts))
+                frame_ts_val = datetime.fromisoformat(str(violation.get("frame_ts")))
             except Exception:
                 try:
-                    ts = float(violation.frame_ts)
+                    ts = float(violation.get("frame_ts"))
                     frame_ts_val = datetime.fromtimestamp(ts, tz=timezone.utc)
                 except Exception:
                     frame_ts_val = None
@@ -89,11 +89,11 @@ def create_violation(violation: ViolationCreate, db: Session = Depends(get_db), 
         frame_ts_val = frame_ts_val.astimezone(timezone.utc)
     now_utc = datetime.now(timezone.utc)
     new_violation = Violation(
-        violation_types=violation.violation_types,
-        worker_id=violation.worker_id,
+        violation_types=violation.get("violation_types"),
+        worker_id=violation.get("worker_id"),
         frame_ts=frame_ts_val,
-        worker_code=violation.worker_code,
-        camera_id=violation.camera_id,
+        worker_code=violation.get("worker_code"),
+        camera_id=violation.get("camera_id"),
         user_id=current_user.id,
         status="pending",
         created_at=now_utc,
@@ -154,34 +154,52 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
     new_status = payload.get("status")
     if new_status not in ["pending", "resolved", "false positive"]:
         raise HTTPException(status_code=400, detail="Invalid status")
-    violation.status = new_status
-    now_utc = datetime.now(timezone.utc)
-    if new_status.lower() == "resolved":
-        violation.resolved_at = now_utc
-        try:
-            if getattr(violation, "created_at", None) is not None:
-                created_at = violation.created_at
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=timezone.utc)
-                violation.response_time = (violation.resolved_at - created_at).total_seconds() / 60.0
-        except Exception:
-            pass
-    else:
-        violation.resolved_at = None
-    violation.manually_changed = True
-    db.commit()
-    db.refresh(violation)
-    status_message = f"Violation #{violation.id} status updated to {new_status}"
+    try:
+        prev_status = (violation.status or "").strip().lower()
+        new_status_l = str(new_status).strip().lower()
+        if prev_status != new_status_l:
+            violation.manually_changed = True
+            try:
+                violation.changed_by = getattr(current_user, "id", None)
+            except Exception:
+                violation.changed_by = None
+            try:
+                violation.changed_at = datetime.now(timezone.utc)
+            except Exception:
+                violation.changed_at = None
+        violation.status = new_status_l
+        now_utc = datetime.now(timezone.utc)
+        if new_status_l == "resolved":
+            violation.resolved_at = now_utc
+            try:
+                if getattr(violation, "created_at", None) is not None:
+                    created_at = violation.created_at
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    violation.response_time = (violation.resolved_at - created_at).total_seconds() / 60.0
+            except Exception:
+                pass
+        else:
+            violation.resolved_at = None
+        db.commit()
+        db.refresh(violation)
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update status")
+    status_message = f"Violation #{violation.id} status updated to {violation.status}"
     status_notification = Notification(
         message=status_message,
         user_id=violation.user_id or current_user.id,
         violation_id=violation.id,
         is_read=False,
-        created_at=now_utc
+        created_at=datetime.now(timezone.utc)
     )
-    db.add(status_notification)
-    db.commit()
-    db.refresh(status_notification)
+    try:
+        db.add(status_notification)
+        db.commit()
+        db.refresh(status_notification)
+    except Exception:
+        db.rollback()
     cam = db.query(Camera).filter(Camera.id == violation.camera_id).first()
     if cam:
         camera_display = f"{cam.name} ({cam.location})" if cam.name and cam.location else (cam.name or cam.location)
@@ -196,7 +214,7 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
         "violation_id": violation.id,
         "status": violation.status,
         "message": status_message,
-        "created_at": status_notification.created_at.isoformat(),
+        "created_at": status_notification.created_at.isoformat() if 'status_notification' in locals() else datetime.now(timezone.utc).isoformat(),
         "camera_display": camera_display,
         "camera": camera_name,
         "camera_location": camera_location,
@@ -208,4 +226,4 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
         loop.create_task(broadcast_notification(violation.user_id or current_user.id, notification_data))
     except RuntimeError:
         asyncio.run(broadcast_notification(violation.user_id or current_user.id, notification_data))
-    return {"message": "Status updated", "status": violation.status, "violation_id": violation.id, "created_at": status_notification.created_at.isoformat()}
+    return {"message": "Status updated", "status": violation.status, "violation_id": violation.id, "created_at": status_notification.created_at.isoformat() if 'status_notification' in locals() else datetime.now(timezone.utc).isoformat()}

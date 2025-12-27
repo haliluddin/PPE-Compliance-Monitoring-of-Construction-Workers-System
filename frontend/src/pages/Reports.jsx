@@ -1,6 +1,7 @@
+// frontend/src/pages/Reports.jsx
 import React, { useState, useEffect } from "react";
 import API from "../api";
-import { FiSearch, FiDownload, FiCheck } from "react-icons/fi";
+import { FiSearch, FiDownload, FiCheck, FiAlertTriangle } from "react-icons/fi";
 import { HiOutlinePrinter } from "react-icons/hi";
 import { FaMapMarkerAlt, FaUserAlt, FaChartLine } from 'react-icons/fa';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, LineChart, Line, Legend } from 'recharts';
@@ -21,6 +22,8 @@ export default function Reports() {
   const [workerData, setWorkerData] = useState([]);
   const [performanceData, setPerformanceData] = useState([]);
   const [avgResponseTime, setAvgResponseTime] = useState(0);
+  const [falsePositives, setFalsePositives] = useState([]);
+  const [manualOverrides, setManualOverrides] = useState([]);
 
   useEffect(() => {
     const fetchReports = async () => {
@@ -32,14 +35,11 @@ export default function Reports() {
             : selectedPeriod === "Last Month"
             ? "last_month"
             : "today";
-
         const response = await API.get(`/reports?period=${periodParam}`, {
           headers: { Authorization: token ? `Bearer ${token}` : undefined },
         });
-
         setCameraData(response.data.camera_data || []);
         setWorkerData(response.data.worker_data || []);
-
         setStats({
           total_incidents: response.data.total_incidents || 0,
           total_workers_involved: response.data.total_workers_involved || 0,
@@ -48,7 +48,6 @@ export default function Reports() {
           false_positive_count: response.data.false_positive_count || 0,
           manual_override_count: response.data.manual_override_count || 0
         });
-
         setViolationsData(response.data.most_violations || []);
         setOffendersData(
           (response.data.top_offenders || []).map((o, i) => ({
@@ -57,11 +56,12 @@ export default function Reports() {
             value: o.value ?? o.violations ?? o.count ?? 0
           }))
         );
+        setFalsePositives(response.data.false_positives || []);
+        setManualOverrides(response.data.manual_overrides || []);
       } catch (err) {
         console.error("Error fetching reports:", err);
       }
     };
-
     fetchReports();
   }, [selectedPeriod]);
 
@@ -75,18 +75,15 @@ export default function Reports() {
             : selectedPeriod === "Last Month"
             ? "last_month"
             : "today";
-
         const res = await API.get(`/reports/performance?period=${periodParam}`, {
           headers: { Authorization: token ? `Bearer ${token}` : undefined },
         });
-
         setPerformanceData(res.data.performance_over_time || []);
         setAvgResponseTime(res.data.average_response_time || 0);
       } catch (err) {
         console.error("Error fetching performance data:", err);
       }
     };
-
     fetchPerformance();
   }, [selectedPeriod]);
 
@@ -99,19 +96,16 @@ export default function Reports() {
           : selectedPeriod === "Last Month"
           ? "last_month"
           : "today";
-
       const res = await API.get(`/reports/export?period=${periodParam}`, {
         headers: { Authorization: token ? `Bearer ${token}` : undefined },
         responseType: "blob"
       });
-
       const now = new Date();
       const yyyy = now.getFullYear();
       const mm = String(now.getMonth() + 1).padStart(2, "0");
       const dd = String(now.getDate()).padStart(2, "0");
       const dateStr = `${yyyy}${mm}${dd}`;
       const filename = `report_${periodParam}_${getDateRangeLabel().replace(/[^a-zA-Z0-9]/g, "_")}.csv`;
-
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -119,7 +113,6 @@ export default function Reports() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-
     } catch (err) {
       console.error("Error exporting report:", err);
     }
@@ -128,11 +121,9 @@ export default function Reports() {
   const getDateRangeLabel = () => {
     const now = new Date();
     let startDate, endDate;
-
     if (selectedPeriod === "Today") {
       return now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
     }
-
     if (selectedPeriod === "Last Week") {
       endDate = new Date(now);
       startDate = new Date(now);
@@ -142,10 +133,8 @@ export default function Reports() {
       startDate = new Date(now);
       startDate.setMonth(now.getMonth() - 1);
     }
-
     const formatDate = (date) =>
       date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-
     return `${formatDate(startDate)} - ${formatDate(endDate)}`;
   };
 
@@ -157,7 +146,6 @@ export default function Reports() {
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6" id="printable-reports">
-
       <div className="flex flex-wrap items-center gap-4 mb-6">
         <div className="relative flex-1 min-w-[250px] max-w-md">
           <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -167,7 +155,6 @@ export default function Reports() {
             className="w-full pl-12 pr-4 py-3 border border-gray-700 rounded-lg shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-[#5388DF] bg-[#2A2B30] text-gray-200"
           />
         </div>
-
         <button
           onClick={handleExport}
           className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors"
@@ -175,7 +162,6 @@ export default function Reports() {
           <FiDownload className="w-4 h-4" />
           Export
         </button>
-
         <button
           onClick={handlePrint}
           className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-white bg-[#5388DF] rounded-lg hover:bg-[#19325C] transition-colors"
@@ -183,7 +169,6 @@ export default function Reports() {
           <HiOutlinePrinter className="w-4 h-4" />
           Print
         </button>
-
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setSelectedPeriod('Last Month')}
@@ -208,9 +193,9 @@ export default function Reports() {
       </div>
 
       {stats.total_incidents === 0 &&
-       stats.total_workers_involved === 0 &&
-       violationsData.length === 0 &&
-       offendersData.length === 0 ? (
+        stats.total_workers_involved === 0 &&
+        violationsData.length === 0 &&
+        offendersData.length === 0 ? (
         <div className="text-center text-gray-400 text-sm my-6">
           No data for {selectedPeriod}.
         </div>
@@ -322,6 +307,69 @@ export default function Reports() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <div className="flex items-center gap-2 mb-4">
+                <FiAlertTriangle className="text-yellow-400" />
+                <h3 className="text-xl font-semibold text-gray-200">False Positives</h3>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto pr-2 space-y-3">
+                {falsePositives.length === 0 ? (
+                  <div className="text-gray-400 text-sm">No false positives in this period.</div>
+                ) : (
+                  falsePositives.map((f) => (
+                    <div key={f.id} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 hover:bg-[#3A3B40] transition-colors flex gap-3">
+                      <div className="w-20 h-14 rounded overflow-hidden bg-gray-800 flex-shrink-0">
+                        {f.snapshot ? (
+                          <img src={`data:image/jpeg;base64,${f.snapshot}`} alt="snap" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-xs text-gray-500">No Image</div>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-gray-200 font-medium">{f.worker_name || f.worker_code || "Unknown"}</p>
+                        <p className="text-gray-400 text-sm">{f.violation_types || "Unknown Violation"}</p>
+                        <p className="text-gray-400 text-xs mt-1">{f.created_at ? new Date(f.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : 'N/A'}</p>
+                        <p className="text-gray-400 text-xs">{f.camera || ""}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <div className="flex items-center gap-2 mb-4">
+                <FiCheck className="text-indigo-400" />
+                <h3 className="text-xl font-semibold text-gray-200">Manual Overrides</h3>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto pr-2 space-y-3">
+                {manualOverrides.length === 0 ? (
+                  <div className="text-gray-400 text-sm">No manual overrides in this period.</div>
+                ) : (
+                  manualOverrides.map((m) => (
+                    <div key={m.id} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 hover:bg-[#3A3B40] transition-colors flex gap-3">
+                      <div className="w-20 h-14 rounded overflow-hidden bg-gray-800 flex-shrink-0">
+                        {m.snapshot ? (
+                          <img src={`data:image/jpeg;base64,${m.snapshot}`} alt="snap" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-xs text-gray-500">No Image</div>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-gray-200 font-medium">{m.worker_name || m.worker_code || "Unknown"}</p>
+                        <p className="text-gray-400 text-sm">{m.violation_types || "Unknown Violation"}</p>
+                        <p className="text-gray-400 text-xs mt-1">Created: {m.created_at ? new Date(m.created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : 'N/A'}</p>
+                        <p className="text-gray-400 text-xs">Changed: {m.changed_at ? new Date(m.changed_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) : '—'}</p>
+                        <p className="text-gray-400 text-xs">{m.camera || ""}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
