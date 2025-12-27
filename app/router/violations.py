@@ -1,4 +1,3 @@
-# app/router/violations.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -160,9 +159,10 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
         if prev_status != new_status_l:
             violation.manually_changed = True
             try:
-                violation.changed_by = getattr(current_user, "id", None)
+                uid = getattr(current_user, "id", None)
+                violation.changed_by = int(uid) if uid is not None else None
             except Exception:
-                violation.changed_by = None
+                violation.changed_by = getattr(current_user, "id", None)
             try:
                 violation.changed_at = datetime.now(timezone.utc)
             except Exception:

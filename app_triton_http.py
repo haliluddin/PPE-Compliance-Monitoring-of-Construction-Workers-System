@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -728,16 +727,17 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
         try:
-            prev_status = (v.status or "").lower()
+            prev_status = (v.status or "").strip().lower()
             new_status_l = str(new_status).strip().lower()
             if new_status_l not in ("pending", "resolved", "false positive"):
                 raise HTTPException(status_code=400, detail="Invalid status")
             if prev_status != new_status_l:
                 v.manually_changed = True
                 try:
-                    v.changed_by = getattr(current_user, "id", None)
+                    uid = getattr(current_user, "id", None)
+                    v.changed_by = int(uid) if uid is not None else None
                 except Exception:
-                    v.changed_by = None
+                    v.changed_by = getattr(current_user, "id", None)
                 try:
                     v.changed_at = datetime.now(timezone.utc)
                 except Exception:
