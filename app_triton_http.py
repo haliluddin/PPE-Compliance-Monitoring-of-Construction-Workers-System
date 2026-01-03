@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from app.router.auth import get_current_user
 import numpy as np
@@ -49,6 +51,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+_frontend_dist = os.path.join(os.getcwd(), "frontend", "dist")
+if os.path.isdir(_frontend_dist):
+    app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dist, "assets")), name="assets")
+    app.mount("/static", StaticFiles(directory=_frontend_dist), name="static")
+    @app.get("/{full_path:path}")
+    async def spa_index(full_path: str):
+        index_file = os.path.join(_frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Not Found")
+
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
@@ -728,16 +741,17 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
         try:
-            prev_status = (v.status or "").lower()
+            prev_status = (v.status or "").strip().lower()
             new_status_l = str(new_status).strip().lower()
             if new_status_l not in ("pending", "resolved", "false positive"):
                 raise HTTPException(status_code=400, detail="Invalid status")
             if prev_status != new_status_l:
                 v.manually_changed = True
                 try:
-                    v.changed_by = getattr(current_user, "id", None)
+                    uid = getattr(current_user, "id", None)
+                    v.changed_by = int(uid) if uid is not None else None
                 except Exception:
-                    v.changed_by = None
+                    v.changed_by = getattr(current_user, "id", None)
                 try:
                     v.changed_at = datetime.now(timezone.utc)
                 except Exception:
