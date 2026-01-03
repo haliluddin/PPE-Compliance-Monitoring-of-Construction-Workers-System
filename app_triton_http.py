@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -16,10 +15,9 @@ import queue
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body, Depends, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from app.router.auth import get_current_user
 import numpy as np
@@ -64,7 +62,6 @@ try:
         log.warning("app.router.auth imported but no router/auth_router attribute found. auth endpoints not mounted.")
 except Exception as e:
     log.warning("Failed to include auth router from app.router.auth: %s", e)
-
 _frontend_dist = os.path.join(os.getcwd(), "frontend", "dist")
 if os.path.isdir(_frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dist, "assets")), name="assets")
@@ -75,7 +72,6 @@ if os.path.isdir(_frontend_dist):
         if os.path.exists(index_file):
             return FileResponse(index_file)
         raise HTTPException(status_code=404, detail="Not Found")
-
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
@@ -102,6 +98,7 @@ PROCESS_WORKERS = int(os.environ.get("PROCESS_WORKERS", "3"))
 STREAM_QUEUE_MAXSIZE = int(os.environ.get("STREAM_QUEUE_MAXSIZE", "32"))
 PROCESS_EXECUTOR = ThreadPoolExecutor(max_workers=PROCESS_WORKERS)
 PROCESS_SEM = threading.BoundedSemaphore(PROCESS_WORKERS)
+
 def try_open_capture(source, wait_seconds=8, sleep_step=0.25):
     start = time.time()
     try:
@@ -137,6 +134,7 @@ def try_open_capture(source, wait_seconds=8, sleep_step=0.25):
     except Exception:
         pass
     return cap
+
 def to_iso_ph(dt):
     if dt is None:
         return None
@@ -149,6 +147,7 @@ def to_iso_ph(dt):
             return dt.isoformat()
         except Exception:
             return None
+
 def sanitize_triton_url(url: str) -> str:
     if not url:
         return url
@@ -157,6 +156,7 @@ def sanitize_triton_url(url: str) -> str:
         p = urlparse(url)
         return p.netloc or p.path
     return url
+
 def load_model_metadata(client, model_name):
     try:
         meta = client.get_model_metadata(model_name)
@@ -167,6 +167,7 @@ def load_model_metadata(client, model_name):
         return {'input_name': input_name, 'output_names': output_names}
     except Exception:
         return {'input_name': None, 'output_names': []}
+
 @app.on_event("startup")
 def startup_event():
     global triton, triton_models_meta, redis_sync, redis_pubsub
@@ -232,6 +233,7 @@ def startup_event():
         asyncio.create_task(redis_subscriber_task())
     except Exception:
         pass
+
 @app.on_event("shutdown")
 def shutdown_event():
     global triton, redis_pubsub
@@ -253,9 +255,11 @@ def shutdown_event():
             evt.set()
         except Exception:
             pass
+
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -275,6 +279,7 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
+
 @app.websocket("/ws/notifications")
 async def websocket_notifications(ws: WebSocket):
     await ws.accept()
@@ -294,6 +299,7 @@ async def websocket_notifications(ws: WebSocket):
     finally:
         if ws in ws_clients:
             ws_clients.remove(ws)
+
 async def redis_subscriber_task():
     global redis_pubsub
     if redis_pubsub is None:
@@ -325,6 +331,7 @@ async def redis_subscriber_task():
         except Exception:
             await asyncio.sleep(0.1)
         await asyncio.sleep(0.01)
+
 @app.post("/jobs")
 def create_job(payload: dict, current_user=Depends(get_current_user)):
     sess = SessionLocal()
@@ -340,6 +347,7 @@ def create_job(payload: dict, current_user=Depends(get_current_user)):
         return {"job_id": job.id, "status": job.status}
     finally:
         sess.close()
+
 def _submit_processing(img_bytes, meta):
     def _run():
         try:
@@ -356,6 +364,7 @@ def _submit_processing(img_bytes, meta):
             PROCESS_SEM.release()
         except Exception:
             pass
+
 def process_video_file(job_id: int, filepath: str, camera_id=None):
     cap = None
     try:
@@ -527,6 +536,7 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             sess.close()
         except Exception:
             pass
+
 @app.post("/jobs/{job_id}/upload")
 async def upload_job_video(job_id: int, file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     INFER_REQUESTS.inc()
@@ -562,11 +572,13 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         STREAM_THREADS[job_id] = thread
         thread.start()
     return {"status": "accepted", "job_id": job_id}
+
 class StreamStart(BaseModel):
     stream_url: str
     camera_id: int = None
     job_id: int = None
     draw_labels: bool = True
+
 def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threading.Event = None):
     cap = None
     try:
@@ -744,6 +756,7 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
             sess.close()
         except Exception:
             pass
+
 @app.put("/violations/{violation_id}/status")
 def update_violation_status(violation_id: int, payload: dict = Body(...), current_user=Depends(get_current_user)):
     sess = SessionLocal()
@@ -803,3 +816,92 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
         return {"id": v.id, "status": v.status}
     finally:
         sess.close()
+
+@app.get("/cameras")
+def list_cameras():
+    sess = SessionLocal()
+    try:
+        cams = sess.query(Camera).all()
+        result = []
+        for c in cams:
+            cid = getattr(c, "id", None)
+            name = getattr(c, "location", None) or getattr(c, "name", None) or ""
+            source = getattr(c, "source", "") or getattr(c, "rtsp_url", "") or ""
+            status = getattr(c, "status", "unknown")
+            viol_count = 0
+            try:
+                if hasattr(Violation, "camera_id") and cid is not None:
+                    viol_count = sess.query(Violation).filter(Violation.camera_id == cid).count()
+                else:
+                    if hasattr(Violation, "camera"):
+                        viol_count = sess.query(Violation).filter(getattr(Violation, "camera") == name).count()
+            except Exception:
+                viol_count = 0
+            result.append({"id": cid, "location": name, "source": source, "status": status, "violations": viol_count})
+        return result
+    finally:
+        sess.close()
+
+@app.get("/workers")
+def list_workers():
+    sess = SessionLocal()
+    try:
+        try:
+            from app.models import Worker
+            workers = sess.query(Worker).all()
+            res = []
+            for w in workers:
+                res.append({"id": getattr(w, "id", None), "fullName": getattr(w, "fullName", None) or getattr(w, "name", None) or "", "worker_code": getattr(w, "worker_code", None) or getattr(w, "code", None) or "", "lastSeen": getattr(w, "last_seen", None) or None, "totalIncidents": getattr(w, "total_incidents", 0)})
+            return res
+        except Exception:
+            return []
+    finally:
+        sess.close()
+
+@app.get("/reports")
+def reports(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        viols = sess.query(Violation).all()
+        total_incidents = len(viols)
+        workers_set = set()
+        resolved = 0
+        false_positives = []
+        manual_overrides = []
+        for v in viols:
+            worker = getattr(v, "worker_name", None) or getattr(v, "worker", None) or getattr(v, "worker_code", None) or None
+            if worker:
+                workers_set.add(worker)
+            st = (getattr(v, "status", None) or "").lower()
+            if st == "resolved":
+                resolved += 1
+            if st == "false positive":
+                manual_snapshot = getattr(v, "snapshot", None) or getattr(v, "snapshot_b64", None) or None
+                false_positives.append({"id": getattr(v, "id", None), "worker_name": worker or "Unknown", "violation_types": getattr(v, "violation_types", None) or getattr(v, "violation_type", None) or getattr(v, "type", None) or "Unknown", "created_at": to_iso_ph(getattr(v, "created_at", None) or getattr(v, "date", None)), "camera": getattr(v, "camera", None) or getattr(v, "camera_name", None) or "", "snapshot": manual_snapshot})
+            if getattr(v, "manually_changed", False):
+                manual_snapshot = getattr(v, "snapshot", None) or getattr(v, "snapshot_b64", None) or None
+                manual_overrides.append({"id": getattr(v, "id", None), "worker_name": worker or "Unknown", "violation_types": getattr(v, "violation_types", None) or getattr(v, "violation_type", None) or getattr(v, "type", None) or "Unknown", "created_at": to_iso_ph(getattr(v, "created_at", None) or getattr(v, "date", None)), "changed_at": to_iso_ph(getattr(v, "changed_at", None)), "camera": getattr(v, "camera", None) or getattr(v, "camera_name", None) or "", "snapshot": manual_snapshot})
+        violation_resolution_rate = int((resolved / total_incidents * 100)) if total_incidents > 0 else 0
+        camera_data = []
+        try:
+            cams = sess.query(Camera).all()
+            for c in cams:
+                camera_data.append({"location": getattr(c, "location", None) or getattr(c, "name", None) or "", "violations": 0, "risk": "Low"})
+        except Exception:
+            camera_data = []
+        worker_data = []
+        return {"camera_data": camera_data, "worker_data": worker_data, "total_incidents": total_incidents, "total_workers_involved": len(workers_set), "violation_resolution_rate": violation_resolution_rate, "high_risk_locations": 0, "false_positive_count": len(false_positives), "manual_override_count": len(manual_overrides), "most_violations": [], "top_offenders": [], "false_positives": false_positives, "manual_overrides": manual_overrides}
+    finally:
+        sess.close()
+
+@app.get("/reports/performance")
+def reports_performance(period: str = "today"):
+    sess = SessionLocal()
+    try:
+        performance_over_time = []
+        avg_response_time = 0
+        return {"performance_over_time": performance_over_time, "average_response_time": avg_response_time}
+    finally:
+        sess.close()
+
+
