@@ -5,6 +5,7 @@ os.environ.setdefault("MKL_NUM_THREADS","1")
 os.environ.setdefault("NUMEXPR_MAX_THREADS","1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS","1")
 os.environ.setdefault("MEDIAPIPE_DISABLE_GPU","1")
+
 import time
 import logging
 import asyncio
@@ -15,9 +16,8 @@ import queue
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body, Depends, Query
-from fastapi.responses import Response, StreamingResponse, FileResponse
+from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from app.router.auth import get_current_user
 import numpy as np
@@ -40,7 +40,9 @@ from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
 from sqlalchemy.orm import Session
+
 log = logging.getLogger("uvicorn.error")
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -49,31 +51,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 try:
-    import importlib
-    auth_mod = importlib.import_module("app.router.auth")
-    if hasattr(auth_mod, "router"):
-        app.include_router(auth_mod.router)
-        log.info("Included auth router from app.router.auth (router)")
-    elif hasattr(auth_mod, "auth_router"):
-        app.include_router(auth_mod.auth_router)
-        log.info("Included auth router from app.router.auth (auth_router)")
-    else:
-        log.warning("app.router.auth imported but no router/auth_router attribute found. auth endpoints not mounted.")
-except Exception as e:
-    log.warning("Failed to include auth router from app.router.auth: %s", e)
-_frontend_dist = os.path.join(os.getcwd(), "frontend", "dist")
-if os.path.isdir(_frontend_dist):
-    app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dist, "assets")), name="assets")
-    app.mount("/static", StaticFiles(directory=_frontend_dist), name="static")
-    @app.get("/{full_path:path}")
-    async def spa_index(full_path: str):
-        index_file = os.path.join(_frontend_dist, "index.html")
-        if os.path.exists(index_file):
-            return FileResponse(index_file)
-        raise HTTPException(status_code=404, detail="Not Found")
+    from app.router.auth import router as auth_router
+    app.include_router(auth_router)
+except Exception:
+    pass
+try:
+    from app.router.notifications_ws import router as notifications_ws_router
+    app.include_router(notifications_ws_router)
+except Exception:
+    pass
+try:
+    from app.router.notifications import router as notifications_router
+    app.include_router(notifications_router)
+except Exception:
+    pass
+try:
+    from app.router.reports import router as reports_router
+    app.include_router(reports_router)
+except Exception:
+    pass
+try:
+    from app.router.violations import router as violations_router
+    app.include_router(violations_router)
+except Exception:
+    pass
+try:
+    from app.router.workers import router as workers_router
+    app.include_router(workers_router)
+except Exception:
+    pass
+
 INFER_REQUESTS = Counter("api_infer_requests_total", "Total inference requests")
 TASKS_QUEUED = Counter("api_tasks_queued_total", "Total tasks enqueued")
+
 TRITON_MODEL = os.environ.get("TRITON_MODEL_NAME", "ppe_yolo")
 HUMAN_MODEL = os.environ.get("HUMAN_MODEL_NAME", "person_yolo")
 TRITON_URL = os.environ.get("TRITON_URL", "")
@@ -81,21 +93,26 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 WS_CHANNEL = os.environ.get("WS_CHANNEL", "ppe_results")
 tmp_upload_dir = os.environ.get("UPLOAD_DIR", "/tmp/uploads")
 os.makedirs(tmp_upload_dir, exist_ok=True)
+
 triton = None
 triton_models_meta = {}
 redis_sync = None
 redis_pubsub = None
 ws_clients = set()
 APP_LOOP = None
+
 STREAM_THREADS = {}
 STREAM_EVENTS = {}
 STREAM_QUEUES = {}
 FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
 USE_CELERY = os.environ.get("USE_CELERY", "false").lower() in ("1","true","yes")
 PH_TZ = timezone(timedelta(hours=8))
+
 from concurrent.futures import ThreadPoolExecutor
+
 PROCESS_WORKERS = int(os.environ.get("PROCESS_WORKERS", "3"))
 STREAM_QUEUE_MAXSIZE = int(os.environ.get("STREAM_QUEUE_MAXSIZE", "32"))
+
 PROCESS_EXECUTOR = ThreadPoolExecutor(max_workers=PROCESS_WORKERS)
 PROCESS_SEM = threading.BoundedSemaphore(PROCESS_WORKERS)
 
@@ -134,6 +151,11 @@ def try_open_capture(source, wait_seconds=8, sleep_step=0.25):
     except Exception:
         pass
     return cap
+
+try:
+    from app.router.auth import router as auth_router_dup
+except Exception:
+    pass
 
 def to_iso_ph(dt):
     if dt is None:
@@ -757,6 +779,185 @@ def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threadin
         except Exception:
             pass
 
+@app.post("/streams")
+def start_stream(payload: StreamStart, current_user=Depends(get_current_user)):
+    rtsp_url = payload.stream_url
+    camera_id = payload.camera_id
+    job_id = payload.job_id
+    if job_id is None:
+        sess = SessionLocal()
+        try:
+            job_meta = {"stream_url": rtsp_url, "draw_labels": bool(getattr(payload, "draw_labels", True))}
+            job = Job(job_type="stream", camera_id=camera_id, status="queued", meta=job_meta, user_id=getattr(current_user, "id", None))
+            sess.add(job)
+            sess.commit()
+            sess.refresh(job)
+            job_id = job.id
+        finally:
+            sess.close()
+    stop_event = threading.Event()
+    STREAM_EVENTS[job_id] = stop_event
+    thread = threading.Thread(target=stream_loop, args=(job_id, rtsp_url, camera_id, stop_event), daemon=True)
+    STREAM_THREADS[job_id] = thread
+    thread.start()
+    return {"job_id": job_id, "status": "started"}
+
+@app.post("/streams/{job_id}/stop")
+def stop_stream(job_id: int):
+    evt = STREAM_EVENTS.get(job_id)
+    if not evt:
+        raise HTTPException(status_code=404, detail="stream not found")
+    evt.set()
+    thread = STREAM_THREADS.get(job_id)
+    if thread and thread.is_alive():
+        thread.join(timeout=2.0)
+    STREAM_EVENTS.pop(job_id, None)
+    STREAM_THREADS.pop(job_id, None)
+    STREAM_QUEUES.pop(job_id, None)
+    sess = SessionLocal()
+    try:
+        job = sess.query(Job).filter(Job.id == job_id).first()
+        if job:
+            job.status = "stopped"
+            job.finished_at = datetime.now(timezone.utc)
+            sess.commit()
+    finally:
+        sess.close()
+    return {"job_id": job_id, "status": "stopped"}
+
+@app.post("/infer")
+async def infer(file: UploadFile = File(...), camera_id: int = None, job_id: int = None):
+    INFER_REQUESTS.inc()
+    data = await file.read()
+    if data is None or len(data) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    meta = {"camera_id": camera_id, "job_id": job_id, "ts": time.time()}
+    if USE_CELERY:
+        try:
+            b64 = base64.b64encode(data).decode("ascii")
+            task = process_image_task.delay(b64, meta)
+            TASKS_QUEUED.inc()
+            return {"task_id": task.id, "status": "queued"}
+        except Exception:
+            try:
+                res = process_image(data, meta)
+                return {"task_id": None, "status": "processed", "result": res}
+            except Exception:
+                raise HTTPException(status_code=500, detail="processing failed")
+    else:
+        try:
+            res = process_image(data, meta)
+            return {"task_id": None, "status": "processed", "result": res}
+        except Exception:
+            try:
+                b64 = base64.b64encode(data).decode("ascii")
+                task = process_image_task.delay(b64, meta)
+                TASKS_QUEUED.inc()
+                return {"task_id": task.id, "status": "queued"}
+            except Exception:
+                raise HTTPException(status_code=500, detail="processing failed")
+
+@app.post("/infer_sync")
+async def infer_sync(file: UploadFile = File(...)):
+    INFER_REQUESTS.inc()
+    global triton, TRITON_MODEL
+    if triton is None:
+        raise HTTPException(status_code=503, detail="Triton server not ready")
+    data = await file.read()
+    nparr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(status_code=400, detail="Could not decode image")
+    img = cv2.resize(img, (416, 416))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype("float32")
+    img = np.transpose(img, (2, 0, 1))[None, ...]
+    meta = triton_models_meta.get(TRITON_MODEL, {})
+    input_name = meta.get('input_name')
+    output_names = meta.get('output_names', [])
+    if not input_name or not output_names:
+        raise HTTPException(status_code=503, detail="Model metadata not available")
+    inp = InferInput(input_name, img.shape, "FP32")
+    inp.set_data_from_numpy(img)
+    outputs = [InferRequestedOutput(n) for n in output_names]
+    res = triton.infer(TRITON_MODEL, inputs=[inp], outputs=outputs)
+    results = {n: res.as_numpy(n).tolist() for n in output_names}
+    return {"model": TRITON_MODEL, "outputs": results}
+
+@app.get("/jobs/{job_id}/status")
+def job_status(job_id: int):
+    sess = SessionLocal()
+    try:
+        job = sess.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "meta": job.meta,
+            "created_at": to_iso_ph(getattr(job, "created_at", None)),
+            "started_at": to_iso_ph(getattr(job, "started_at", None)),
+            "finished_at": to_iso_ph(getattr(job, "finished_at", None))
+        }
+    finally:
+        sess.close()
+
+@app.get("/violations")
+def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
+    sess = SessionLocal()
+    try:
+        q = sess.query(Violation)
+        if job_id is not None:
+            q = q.filter(Violation.job_id == job_id)
+        rows = q.order_by(Violation.id.desc()).offset(offset).limit(limit).all()
+        out = []
+        for r in rows:
+            worker_name = None
+            try:
+                if getattr(r, "worker", None):
+                    worker_obj = r.worker
+                    worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+            except Exception:
+                worker_name = None
+            if not worker_name:
+                worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
+            camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            try:
+                cam = getattr(r, "camera", None)
+                if cam:
+                    camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                    camera_location = getattr(cam, "location", "") or camera_name
+            except Exception:
+                pass
+            snapshot_b64 = None
+            try:
+                snap = getattr(r, "snapshot", None)
+                if snap:
+                    if isinstance(snap, (bytes, bytearray)):
+                        snapshot_b64 = base64.b64encode(snap).decode("ascii")
+                    elif isinstance(snap, str):
+                        snapshot_b64 = snap
+            except Exception:
+                snapshot_b64 = None
+            out.append({
+                "id": r.id,
+                "job_id": r.job_id,
+                "camera_id": r.camera_id,
+                "worker_code": r.worker_code,
+                "worker": worker_name,
+                "violation_types": r.violation_types,
+                "violation": r.violation_types,
+                "frame_index": r.frame_index,
+                "created_at": to_iso_ph(getattr(r, "created_at", None)),
+                "status": getattr(r, "status", "Pending"),
+                "camera": camera_name,
+                "camera_location": camera_location,
+                "snapshot": snapshot_b64
+            })
+        return out
+    finally:
+        sess.close()
+
 @app.put("/violations/{violation_id}/status")
 def update_violation_status(violation_id: int, payload: dict = Body(...), current_user=Depends(get_current_user)):
     sess = SessionLocal()
@@ -768,27 +969,21 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
         try:
-            prev_status = (v.status or "").strip().lower()
-            new_status_l = str(new_status).strip().lower()
-            if new_status_l not in ("pending", "resolved", "false positive"):
-                raise HTTPException(status_code=400, detail="Invalid status")
-            if prev_status != new_status_l:
-                v.manually_changed = True
-                try:
-                    uid = getattr(current_user, "id", None)
-                    v.changed_by = int(uid) if uid is not None else None
-                except Exception:
-                    v.changed_by = getattr(current_user, "id", None)
-                try:
-                    v.changed_at = datetime.now(timezone.utc)
-                except Exception:
-                    v.changed_at = None
-            v.status = new_status_l
-            if new_status_l == "resolved":
+            prev_status = (v.status or "").lower()
+            v.status = new_status
+            if new_status.lower() == "resolved":
                 try:
                     v.resolved_at = datetime.now(timezone.utc)
                 except Exception:
                     pass
+            if current_user:
+                if prev_status != (new_status or "").lower():
+                    v.manually_changed = True
+                    try:
+                        v.changed_by = getattr(current_user, "id", None)
+                        v.changed_at = datetime.now(timezone.utc)
+                    except Exception:
+                        pass
             sess.commit()
             sess.refresh(v)
         except Exception:
@@ -817,91 +1012,142 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
     finally:
         sess.close()
 
+@app.get("/health")
+def health():
+    if os.environ.get("ALLOW_NO_TRITON","1") in ("1","true","True"):
+        return {"triton_ready": True, "note": "Triton not present; local processing allowed"}
+    ready = triton is not None
+    return {"triton_ready": ready}
+
+@app.get("/notifications")
+def get_notifications(limit: int = 100, offset: int = 0):
+    sess = SessionLocal()
+    try:
+        rows = sess.query(Violation).order_by(Violation.id.desc()).offset(offset).limit(limit).all()
+        out = []
+        for r in rows:
+            worker_name = None
+            try:
+                if getattr(r, "worker", None):
+                    worker_obj = r.worker
+                    worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+            except Exception:
+                worker_name = None
+            if not worker_name:
+                worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
+            camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            camera_location = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            try:
+                cam = getattr(r, "camera", None)
+                if cam:
+                    camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                    camera_location = getattr(cam, "location", "") or camera_name
+            except Exception:
+                pass
+            snapshot_b64 = None
+            try:
+                snap = getattr(r, "snapshot", None)
+                if snap:
+                    if isinstance(snap, (bytes, bytearray)):
+                        snapshot_b64 = base64.b64encode(snap).decode("ascii")
+                    elif isinstance(snap, str):
+                        snapshot_b64 = snap
+            except Exception:
+                snapshot_b64 = None
+            out.append({
+                "id": r.id,
+                "violation_id": r.id,
+                "worker_name": worker_name,
+                "worker_code": getattr(r, "worker_code", None) or "N/A",
+                "violation_type": getattr(r, "violation_types", None) or "Unknown Violation",
+                "violation": getattr(r, "violation_types", None) or "Unknown Violation",
+                "camera": camera_name,
+                "camera_location": camera_location,
+                "created_at": to_iso_ph(getattr(r, "created_at", None)),
+                "is_read": getattr(r, "is_read", False),
+                "status": getattr(r, "status", "Pending"),
+                "type": "worker_violation",
+                "snapshot": snapshot_b64
+            })
+        return out
+    finally:
+        sess.close()
+
+@app.post("/notifications/{notif_id}/mark_read")
+def mark_notification_read(notif_id: int):
+    sess = SessionLocal()
+    try:
+        v = sess.query(Violation).filter(Violation.id == notif_id).first()
+        if not v:
+            raise HTTPException(status_code=404, detail="notification not found")
+        if hasattr(v, "is_read"):
+            v.is_read = True
+            sess.commit()
+        return {"ok": True}
+    finally:
+        sess.close()
+
 @app.get("/cameras")
 def list_cameras():
     sess = SessionLocal()
     try:
-        cams = sess.query(Camera).all()
-        result = []
+        cams = sess.query(Camera).all() if 'Camera' in globals() else []
+        out = []
         for c in cams:
-            cid = getattr(c, "id", None)
-            name = getattr(c, "location", None) or getattr(c, "name", None) or ""
-            source = getattr(c, "source", "") or getattr(c, "rtsp_url", "") or ""
-            status = getattr(c, "status", "unknown")
-            viol_count = 0
-            try:
-                if hasattr(Violation, "camera_id") and cid is not None:
-                    viol_count = sess.query(Violation).filter(Violation.camera_id == cid).count()
-                else:
-                    if hasattr(Violation, "camera"):
-                        viol_count = sess.query(Violation).filter(getattr(Violation, "camera") == name).count()
-            except Exception:
-                viol_count = 0
-            result.append({"id": cid, "location": name, "source": source, "status": status, "violations": viol_count})
-        return result
+            out.append({"id": c.id, "name": getattr(c, "name", f"Camera {c.id}"), "location": getattr(c, "location", "")})
+        return out
     finally:
         sess.close()
 
-@app.get("/workers")
-def list_workers():
+@app.post("/cameras")
+def create_camera(payload: dict = Body(...)):
     sess = SessionLocal()
     try:
+        name = payload.get("name") or ""
+        location = payload.get("location") or ""
+        stream_url = payload.get("stream_url") or ""
+        cam = Camera()
         try:
-            from app.models import Worker
-            workers = sess.query(Worker).all()
-            res = []
-            for w in workers:
-                res.append({"id": getattr(w, "id", None), "fullName": getattr(w, "fullName", None) or getattr(w, "name", None) or "", "worker_code": getattr(w, "worker_code", None) or getattr(w, "code", None) or "", "lastSeen": getattr(w, "last_seen", None) or None, "totalIncidents": getattr(w, "total_incidents", 0)})
-            return res
+            setattr(cam, "name", name)
         except Exception:
-            return []
+            pass
+        try:
+            setattr(cam, "location", location)
+        except Exception:
+            pass
+        try:
+            setattr(cam, "stream_url", stream_url)
+        except Exception:
+            pass
+        sess.add(cam)
+        sess.commit()
+        sess.refresh(cam)
+        return {"camera_id": getattr(cam, "id", None), "id": getattr(cam, "id", None), "name": getattr(cam, "name", None), "location": getattr(cam, "location", None)}
     finally:
         sess.close()
+
+from app.router.reports import get_reports_summary as reports_summary_func, get_performance_data as reports_performance_func, export_reports as reports_export_func
 
 @app.get("/reports")
-def reports(period: str = "today"):
+def quick_reports_proxy(period: str = "today", current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
-        viols = sess.query(Violation).all()
-        total_incidents = len(viols)
-        workers_set = set()
-        resolved = 0
-        false_positives = []
-        manual_overrides = []
-        for v in viols:
-            worker = getattr(v, "worker_name", None) or getattr(v, "worker", None) or getattr(v, "worker_code", None) or None
-            if worker:
-                workers_set.add(worker)
-            st = (getattr(v, "status", None) or "").lower()
-            if st == "resolved":
-                resolved += 1
-            if st == "false positive":
-                manual_snapshot = getattr(v, "snapshot", None) or getattr(v, "snapshot_b64", None) or None
-                false_positives.append({"id": getattr(v, "id", None), "worker_name": worker or "Unknown", "violation_types": getattr(v, "violation_types", None) or getattr(v, "violation_type", None) or getattr(v, "type", None) or "Unknown", "created_at": to_iso_ph(getattr(v, "created_at", None) or getattr(v, "date", None)), "camera": getattr(v, "camera", None) or getattr(v, "camera_name", None) or "", "snapshot": manual_snapshot})
-            if getattr(v, "manually_changed", False):
-                manual_snapshot = getattr(v, "snapshot", None) or getattr(v, "snapshot_b64", None) or None
-                manual_overrides.append({"id": getattr(v, "id", None), "worker_name": worker or "Unknown", "violation_types": getattr(v, "violation_types", None) or getattr(v, "violation_type", None) or getattr(v, "type", None) or "Unknown", "created_at": to_iso_ph(getattr(v, "created_at", None) or getattr(v, "date", None)), "changed_at": to_iso_ph(getattr(v, "changed_at", None)), "camera": getattr(v, "camera", None) or getattr(v, "camera_name", None) or "", "snapshot": manual_snapshot})
-        violation_resolution_rate = int((resolved / total_incidents * 100)) if total_incidents > 0 else 0
-        camera_data = []
-        try:
-            cams = sess.query(Camera).all()
-            for c in cams:
-                camera_data.append({"location": getattr(c, "location", None) or getattr(c, "name", None) or "", "violations": 0, "risk": "Low"})
-        except Exception:
-            camera_data = []
-        worker_data = []
-        return {"camera_data": camera_data, "worker_data": worker_data, "total_incidents": total_incidents, "total_workers_involved": len(workers_set), "violation_resolution_rate": violation_resolution_rate, "high_risk_locations": 0, "false_positive_count": len(false_positives), "manual_override_count": len(manual_overrides), "most_violations": [], "top_offenders": [], "false_positives": false_positives, "manual_overrides": manual_overrides}
+        return reports_summary_func(db=sess, current_user=current_user, period=period)
     finally:
         sess.close()
 
 @app.get("/reports/performance")
-def reports_performance(period: str = "today"):
+def reports_performance_proxy(period: str = "today", current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
-        performance_over_time = []
-        avg_response_time = 0
-        return {"performance_over_time": performance_over_time, "average_response_time": avg_response_time}
+        return reports_performance_func(db=sess, current_user=current_user, period=period)
     finally:
         sess.close()
 
-
+@app.get("/reports/export")
+def reports_export_proxy(period: str = "today", current_user=Depends(get_current_user)):
+    sess = SessionLocal()
+    try:
+        return reports_export_func(db=sess, current_user=current_user, period=period)
+    finally:
+        sess.close()
