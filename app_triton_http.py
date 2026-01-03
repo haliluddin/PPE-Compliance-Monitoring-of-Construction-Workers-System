@@ -51,6 +51,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+try:
+    import importlib
+    auth_mod = importlib.import_module("app.router.auth")
+    if hasattr(auth_mod, "router"):
+        app.include_router(auth_mod.router)
+        log.info("Included auth router from app.router.auth (router)")
+    elif hasattr(auth_mod, "auth_router"):
+        app.include_router(auth_mod.auth_router)
+        log.info("Included auth router from app.router.auth (auth_router)")
+    else:
+        log.warning("app.router.auth imported but no router/auth_router attribute found. auth endpoints not mounted.")
+except Exception as e:
+    log.warning("Failed to include auth router from app.router.auth: %s", e)
+
 _frontend_dist = os.path.join(os.getcwd(), "frontend", "dist")
 if os.path.isdir(_frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dist, "assets")), name="assets")
