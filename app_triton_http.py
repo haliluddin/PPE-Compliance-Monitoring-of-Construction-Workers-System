@@ -977,9 +977,15 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
                 except Exception:
                     pass
             if prev_status != (new_status or "").lower():
-                v.manually_changed = True
+                try:
+                    v.manually_changed = getattr(v, "user_id", None)
+                except Exception:
+                    v.manually_changed = getattr(v, "user_id", None)
                 try:
                     v.changed_by = getattr(v, "user_id", None)
+                except Exception:
+                    v.changed_by = getattr(v, "user_id", None)
+                try:
                     v.changed_at = datetime.now(timezone.utc)
                 except Exception:
                     pass
