@@ -1,3 +1,4 @@
+# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -40,6 +41,7 @@ from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 log = logging.getLogger("uvicorn.error")
 
@@ -952,36 +954,11 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
                 "status": getattr(r, "status", "Pending"),
                 "camera": camera_name,
                 "camera_location": camera_location,
-                "snapshot": snapshot_b64,
-                "manually_changed": bool(getattr(r, "manually_changed", False)),
-                "changed_by": getattr(r, "changed_by", None),
-                "changed_at": to_iso_ph(getattr(r, "changed_at", None))
+                "snapshot": snapshot_b64
             })
         return out
     finally:
         sess.close()
-
-def _extract_user_id(u):
-    if not u:
-        return None
-    try:
-        if isinstance(u, dict):
-            return u.get("id") or u.get("user_id") or u.get("sub") or u.get("userId")
-    except Exception:
-        pass
-    for attr in ("id", "user_id", "userId", "sub"):
-        try:
-            val = getattr(u, attr, None)
-            if val is not None:
-                return val
-        except Exception:
-            continue
-    try:
-        if hasattr(u, "get") and callable(getattr(u, "get")):
-            return u.get("id") or u.get("user_id") or u.get("sub")
-    except Exception:
-        pass
-    return None
 
 @app.put("/violations/{violation_id}/status")
 def update_violation_status(violation_id: int, payload: dict = Body(...), current_user=Depends(get_current_user)):
@@ -993,26 +970,33 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
         new_status = payload.get("status")
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
-        prev_status = (v.status or "").lower()
-        new_status_lower = (new_status or "").lower()
-        update_fields = {"status": new_status}
-        if new_status_lower == "resolved":
-            update_fields["resolved_at"] = datetime.now(timezone.utc)
-        if prev_status != new_status_lower:
-            cur_usr_id = _extract_user_id(current_user)
-            if cur_usr_id is None:
-                cur_usr_id = getattr(v, "user_id", None)
-            try:
-                if cur_usr_id is not None:
-                    cur_usr_id = int(cur_usr_id)
-            except Exception:
-                pass
-            update_fields["manually_changed"] = True
-            update_fields["changed_by"] = cur_usr_id
-            update_fields["changed_at"] = datetime.now(timezone.utc)
-        sess.query(Violation).filter(Violation.id == violation_id).update(update_fields, synchronize_session=False)
-        sess.commit()
-        v = sess.query(Violation).filter(Violation.id == violation_id).first()
+        try:
+            prev_status = (v.status or "").lower()
+            if prev_status != (new_status or "").lower():
+                v.status = new_status
+                v.manually_changed = True
+                try:
+                    # copy what's in violations.user_id into changed_by
+                    v.changed_by = getattr(v, "user_id", None)
+                except Exception:
+                    try:
+                        v.changed_by = getattr(current_user, "id", None)
+                    except Exception:
+                        v.changed_by = None
+                try:
+                    v.changed_at = datetime.now(timezone.utc)
+                except Exception:
+                    pass
+                if new_status.lower() == "resolved":
+                    try:
+                        v.resolved_at = datetime.now(timezone.utc)
+                    except Exception:
+                        pass
+            sess.commit()
+            sess.refresh(v)
+        except Exception:
+            sess.rollback()
+            raise
         notif_payload = {"type": "status_update", "violation_id": v.id, "status": v.status, "created_at": to_iso_ph(datetime.now(timezone.utc))}
         try:
             if redis_sync is not None:
@@ -1032,7 +1016,7 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
                         pass
         except Exception:
             pass
-        return {"id": v.id, "status": v.status, "manually_changed": getattr(v, "manually_changed", None), "changed_by": getattr(v, "changed_by", None), "changed_at": to_iso_ph(getattr(v, "changed_at", None))}
+        return {"id": v.id, "status": v.status}
     finally:
         sess.close()
 
@@ -1091,10 +1075,7 @@ def get_notifications(limit: int = 100, offset: int = 0):
                 "is_read": getattr(r, "is_read", False),
                 "status": getattr(r, "status", "Pending"),
                 "type": "worker_violation",
-                "snapshot": snapshot_b64,
-                "manually_changed": bool(getattr(r, "manually_changed", False)),
-                "changed_by": getattr(r, "changed_by", None),
-                "changed_at": to_iso_ph(getattr(r, "changed_at", None))
+                "snapshot": snapshot_b64
             })
         return out
     finally:
@@ -1159,7 +1140,57 @@ from app.router.reports import get_reports_summary as reports_summary_func, get_
 def quick_reports_proxy(period: str = "today", current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
-        return reports_summary_func(db=sess, current_user=current_user, period=period)
+        base_summary = reports_summary_func(db=sess, current_user=current_user, period=period)
+        false_pos_rows = sess.query(Violation).filter(func.lower(Violation.status) == "false positive").order_by(Violation.id.desc()).limit(100).all()
+        manual_override_rows = sess.query(Violation).filter(getattr(Violation, "manually_changed", False) == True).order_by(Violation.id.desc()).limit(100).all()
+        def _serialize(r):
+            worker_name = None
+            try:
+                if getattr(r, "worker", None):
+                    worker_obj = r.worker
+                    worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+            except Exception:
+                worker_name = None
+            if not worker_name:
+                worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
+            camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+            try:
+                cam = getattr(r, "camera", None)
+                if cam:
+                    camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+            except Exception:
+                pass
+            snapshot_b64 = None
+            try:
+                snap = getattr(r, "snapshot", None)
+                if snap:
+                    if isinstance(snap, (bytes, bytearray)):
+                        snapshot_b64 = base64.b64encode(snap).decode("ascii")
+                    elif isinstance(snap, str):
+                        snapshot_b64 = snap
+            except Exception:
+                snapshot_b64 = None
+            return {
+                "id": r.id,
+                "violation_id": r.id,
+                "job_id": getattr(r, "job_id", None),
+                "worker_code": getattr(r, "worker_code", None),
+                "worker": worker_name,
+                "violation": getattr(r, "violation_types", None) or getattr(r, "violation", None),
+                "status": getattr(r, "status", None),
+                "camera": camera_name,
+                "created_at": to_iso_ph(getattr(r, "created_at", None)),
+                "changed_at": to_iso_ph(getattr(r, "changed_at", None)),
+                "changed_by": getattr(r, "changed_by", None),
+                "manually_changed": bool(getattr(r, "manually_changed", False)),
+                "snapshot": snapshot_b64
+            }
+        false_positives = [_serialize(r) for r in false_pos_rows]
+        manual_overrides = [_serialize(r) for r in manual_override_rows]
+        out = dict(base_summary)
+        out["false_positives"] = false_positives
+        out["manual_overrides"] = manual_overrides
+        return out
     finally:
         sess.close()
 

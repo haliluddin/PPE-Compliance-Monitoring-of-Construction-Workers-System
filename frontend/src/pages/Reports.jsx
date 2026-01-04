@@ -1,3 +1,4 @@
+// frontend/src/pages/Reports.jsx
 import React, { useState, useEffect } from "react";
 import API from "../api";
 import { FiSearch, FiDownload, FiCheck } from "react-icons/fi";
@@ -21,12 +22,12 @@ export default function Reports() {
   const [workerData, setWorkerData] = useState([]);
   const [performanceData, setPerformanceData] = useState([]);
   const [avgResponseTime, setAvgResponseTime] = useState(0);
-  const [allViolations, setAllViolations] = useState([]);
+  const [falsePositives, setFalsePositives] = useState([]);
+  const [manualOverrides, setManualOverrides] = useState([]);
 
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const token = localStorage.getItem("token");
         const periodParam =
           selectedPeriod === "Last Week"
             ? "last_week"
@@ -34,9 +35,7 @@ export default function Reports() {
             ? "last_month"
             : "today";
 
-        const response = await API.get(`/reports?period=${periodParam}`, {
-          headers: { Authorization: token ? `Bearer ${token}` : undefined },
-        });
+        const response = await API.get(`/reports?period=${periodParam}`);
 
         setCameraData(response.data.camera_data || []);
         setWorkerData(response.data.worker_data || []);
@@ -46,8 +45,8 @@ export default function Reports() {
           total_workers_involved: response.data.total_workers_involved || 0,
           violation_resolution_rate: response.data.violation_resolution_rate || 0,
           high_risk_locations: response.data.high_risk_locations || 0,
-          false_positive_count: response.data.false_positive_count || 0,
-          manual_override_count: response.data.manual_override_count || 0
+          false_positive_count: response.data.false_positive_count || (response.data.false_positives ? response.data.false_positives.length : 0),
+          manual_override_count: response.data.manual_override_count || (response.data.manual_overrides ? response.data.manual_overrides.length : 0)
         });
 
         setViolationsData(response.data.most_violations || []);
@@ -58,6 +57,9 @@ export default function Reports() {
             value: o.value ?? o.violations ?? o.count ?? 0
           }))
         );
+
+        setFalsePositives(response.data.false_positives || []);
+        setManualOverrides(response.data.manual_overrides || []);
       } catch (err) {
         console.error("Error fetching reports:", err);
       }
@@ -69,7 +71,6 @@ export default function Reports() {
   useEffect(() => {
     const fetchPerformance = async () => {
       try {
-        const token = localStorage.getItem("token");
         const periodParam =
           selectedPeriod === "Last Week"
             ? "last_week"
@@ -77,10 +78,7 @@ export default function Reports() {
             ? "last_month"
             : "today";
 
-        const res = await API.get(`/reports/performance?period=${periodParam}`, {
-          headers: { Authorization: token ? `Bearer ${token}` : undefined },
-        });
-
+        const res = await API.get(`/reports/performance?period=${periodParam}`);
         setPerformanceData(res.data.performance_over_time || []);
         setAvgResponseTime(res.data.average_response_time || 0);
       } catch (err) {
@@ -91,22 +89,8 @@ export default function Reports() {
     fetchPerformance();
   }, [selectedPeriod]);
 
-  useEffect(() => {
-    const loadAllViolations = async () => {
-      try {
-        const res = await API.get("/violations?limit=200");
-        const arr = Array.isArray(res.data) ? res.data : res.data?.violations || [];
-        setAllViolations(arr);
-      } catch (err) {
-        console.error("Error fetching all violations:", err);
-      }
-    };
-    loadAllViolations();
-  }, []);
-
   const handleExport = async () => {
     try {
-      const token = localStorage.getItem("token");
       const periodParam =
         selectedPeriod === "Last Week"
           ? "last_week"
@@ -115,7 +99,6 @@ export default function Reports() {
           : "today";
 
       const res = await API.get(`/reports/export?period=${periodParam}`, {
-        headers: { Authorization: token ? `Bearer ${token}` : undefined },
         responseType: "blob"
       });
 
@@ -168,9 +151,6 @@ export default function Reports() {
   };
 
   const performanceTicks = performanceData.map((p) => p.date);
-
-  const falsePositives = allViolations.filter(v => (v.status || "").toLowerCase() === "false positive");
-  const manualOverrides = allViolations.filter(v => v.manually_changed === true || (v.changed_by && v.changed_at));
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6" id="printable-reports">
@@ -295,6 +275,61 @@ export default function Reports() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
               <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-xl font-semibold text-gray-200">False Positives Detected</h3>
+              </div>
+              <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+                {falsePositives.length === 0 ? (
+                  <div className="text-gray-400">No false positives recorded.</div>
+                ) : (
+                  falsePositives.map((fp) => (
+                    <div key={fp.id} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 hover:bg-[#3A3B40] transition-colors">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-gray-200 font-medium">{fp.worker || fp.worker_code || "Unknown"}</p>
+                          <p className="text-gray-400 text-sm mt-1">{fp.violation || "Unknown Violation"}</p>
+                          <p className="text-gray-500 text-xs mt-1">{fp.camera || "-"}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-400 text-xs">{fp.created_at ? new Date(fp.created_at).toLocaleString() : "-"}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-xl font-semibold text-gray-200">Manual Overrides / Supervisor Changes</h3>
+              </div>
+              <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+                {manualOverrides.length === 0 ? (
+                  <div className="text-gray-400">No manual overrides recorded.</div>
+                ) : (
+                  manualOverrides.map((mo) => (
+                    <div key={mo.id} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 hover:bg-[#3A3B40] transition-colors">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-gray-200 font-medium">{mo.worker || mo.worker_code || "Unknown"}</p>
+                          <p className="text-gray-400 text-sm mt-1">{mo.violation || "Unknown Violation"}</p>
+                          <p className="text-gray-500 text-xs mt-1">Changed by: {mo.changed_by ?? "N/A"}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-400 text-xs">{mo.changed_at ? new Date(mo.changed_at).toLocaleString() : "-"}</p>
+                          <p className="text-gray-500 text-xs mt-1">{mo.camera || "-"}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <div className="flex items-center gap-2 mb-4">
                 <FaMapMarkerAlt className="text-red-500" />
                 <h3 className="text-xl font-semibold text-gray-200">Camera Location</h3>
               </div>
@@ -335,57 +370,6 @@ export default function Reports() {
                         <p className={`text-lg font-bold ${worker.resolution_rate >= 95 ? 'text-green-500' : worker.resolution_rate >= 80 ? 'text-yellow-500' : 'text-red-500'}`}>{worker.resolution_rate}%</p>
                         <p className="text-gray-400 text-xs">Resolution Rate</p>
                         <p className="text-gray-400 text-sm">{worker.resolved} resolved / {worker.violations} total</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold text-gray-200 mb-4">False Positives</h3>
-              <p className="text-gray-400 text-sm mb-4">Recent detections marked as False Positive.</p>
-              <div className="space-y-3 max-h-56 overflow-auto pr-2">
-                {falsePositives.length === 0 ? (
-                  <div className="text-gray-500 text-sm">No false positives found.</div>
-                ) : falsePositives.slice(0,6).map(fp => (
-                  <div key={fp.id} className="bg-[#1E1F23] p-3 rounded-md border border-gray-700">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="text-white font-medium">{fp.worker || fp.worker_code || "Unknown"}</div>
-                        <div className="text-gray-400 text-sm">{fp.violation}</div>
-                        <div className="text-gray-500 text-xs mt-1">{fp.camera || fp.camera_location || ""}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm text-yellow-300 font-semibold">{(fp.status || "").toUpperCase()}</div>
-                        <div className="text-gray-400 text-xs mt-1">{fp.created_at ? new Date(fp.created_at).toLocaleString() : ""}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold text-gray-200 mb-4">Manual Overrides</h3>
-              <p className="text-gray-400 text-sm mb-4">Detections that were manually changed by a supervisor.</p>
-              <div className="space-y-3 max-h-56 overflow-auto pr-2">
-                {manualOverrides.length === 0 ? (
-                  <div className="text-gray-500 text-sm">No manual overrides recorded.</div>
-                ) : manualOverrides.slice(0,6).map(mo => (
-                  <div key={mo.id} className="bg-[#1E1F23] p-3 rounded-md border border-gray-700">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="text-white font-medium">{mo.worker || mo.worker_code || "Unknown"}</div>
-                        <div className="text-gray-400 text-sm">{mo.violation}</div>
-                        <div className="text-gray-500 text-xs mt-1">{mo.camera || mo.camera_location || ""}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm text-indigo-300 font-semibold">{(mo.status || "").toUpperCase()}</div>
-                        <div className="text-gray-400 text-xs mt-1">{mo.changed_by ? `By: ${mo.changed_by}` : ""}</div>
-                        <div className="text-gray-400 text-xs">{mo.changed_at ? new Date(mo.changed_at).toLocaleString() : ""}</div>
                       </div>
                     </div>
                   </div>
