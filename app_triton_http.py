@@ -1,3 +1,4 @@
+# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -970,22 +971,22 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
             raise HTTPException(status_code=400, detail="status required")
         try:
             prev_status = (v.status or "").lower()
-            v.status = new_status
-            if new_status.lower() == "resolved":
+            new_status_lower = (new_status or "").lower()
+            update_fields = {"status": new_status}
+            if new_status_lower == "resolved":
+                update_fields["resolved_at"] = datetime.now(timezone.utc)
+            if prev_status != new_status_lower:
+                update_fields["manually_changed"] = True
+                cur_usr_id = None
                 try:
-                    v.resolved_at = datetime.now(timezone.utc)
+                    cur_usr_id = getattr(current_user, "id", None)
                 except Exception:
-                    pass
-            if current_user:
-                if prev_status != (new_status or "").lower():
-                    v.manually_changed = True
-                    try:
-                        v.changed_by = getattr(current_user, "id", None)
-                        v.changed_at = datetime.now(timezone.utc)
-                    except Exception:
-                        pass
+                    cur_usr_id = None
+                update_fields["changed_by"] = cur_usr_id
+                update_fields["changed_at"] = datetime.now(timezone.utc)
+            sess.query(Violation).filter(Violation.id == violation_id).update(update_fields, synchronize_session=False)
             sess.commit()
-            sess.refresh(v)
+            v = sess.query(Violation).filter(Violation.id == violation_id).first()
         except Exception:
             sess.rollback()
             raise

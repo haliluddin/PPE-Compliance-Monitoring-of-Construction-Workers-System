@@ -1,3 +1,4 @@
+// frontend/src/pages/Reports.jsx
 import React, { useState, useEffect } from "react";
 import API from "../api";
 import { FiSearch, FiDownload, FiCheck } from "react-icons/fi";
@@ -21,11 +22,12 @@ export default function Reports() {
   const [workerData, setWorkerData] = useState([]);
   const [performanceData, setPerformanceData] = useState([]);
   const [avgResponseTime, setAvgResponseTime] = useState(0);
+  const [falsePositivesList, setFalsePositivesList] = useState([]);
+  const [manualOverridesList, setManualOverridesList] = useState([]);
 
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const token = localStorage.getItem("token");
         const periodParam =
           selectedPeriod === "Last Week"
             ? "last_week"
@@ -33,12 +35,10 @@ export default function Reports() {
             ? "last_month"
             : "today";
 
-        const response = await API.get(`/reports?period=${periodParam}`, {
-          headers: { Authorization: token ? `Bearer ${token}` : undefined },
-        });
+        const response = await API.get(`/reports?period=${periodParam}`);
 
         setCameraData(response.data.camera_data || []);
-        setWorkerData(response.data.worker_data || []);
+        setWorkerData(response.data.worker_data || {});
 
         setStats({
           total_incidents: response.data.total_incidents || 0,
@@ -57,6 +57,11 @@ export default function Reports() {
             value: o.value ?? o.violations ?? o.count ?? 0
           }))
         );
+
+        const fpList = response.data.false_positives || response.data.false_positive_list || response.data.falsePositives || [];
+        const moList = response.data.manual_overrides || response.data.manual_override_list || response.data.manualOverrides || [];
+        setFalsePositivesList(Array.isArray(fpList) ? fpList : []);
+        setManualOverridesList(Array.isArray(moList) ? moList : []);
       } catch (err) {
         console.error("Error fetching reports:", err);
       }
@@ -68,7 +73,6 @@ export default function Reports() {
   useEffect(() => {
     const fetchPerformance = async () => {
       try {
-        const token = localStorage.getItem("token");
         const periodParam =
           selectedPeriod === "Last Week"
             ? "last_week"
@@ -76,10 +80,7 @@ export default function Reports() {
             ? "last_month"
             : "today";
 
-        const res = await API.get(`/reports/performance?period=${periodParam}`, {
-          headers: { Authorization: token ? `Bearer ${token}` : undefined },
-        });
-
+        const res = await API.get(`/reports/performance?period=${periodParam}`);
         setPerformanceData(res.data.performance_over_time || []);
         setAvgResponseTime(res.data.average_response_time || 0);
       } catch (err) {
@@ -92,7 +93,6 @@ export default function Reports() {
 
   const handleExport = async () => {
     try {
-      const token = localStorage.getItem("token");
       const periodParam =
         selectedPeriod === "Last Week"
           ? "last_week"
@@ -101,7 +101,6 @@ export default function Reports() {
           : "today";
 
       const res = await API.get(`/reports/export?period=${periodParam}`, {
-        headers: { Authorization: token ? `Bearer ${token}` : undefined },
         responseType: "blob"
       });
 
@@ -109,7 +108,6 @@ export default function Reports() {
       const yyyy = now.getFullYear();
       const mm = String(now.getMonth() + 1).padStart(2, "0");
       const dd = String(now.getDate()).padStart(2, "0");
-      const dateStr = `${yyyy}${mm}${dd}`;
       const filename = `report_${periodParam}_${getDateRangeLabel().replace(/[^a-zA-Z0-9]/g, "_")}.csv`;
 
       const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -272,6 +270,57 @@ export default function Reports() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <h3 className="text-xl font-semibold text-gray-200 mb-4">False Positive Detections</h3>
+              <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3">
+                {falsePositivesList.length === 0 ? (
+                  <div className="text-gray-400 text-sm">No false positives recorded for this period.</div>
+                ) : (
+                  falsePositivesList.map((fp, i) => (
+                    <div key={fp.id || i} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 flex items-start gap-3">
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="text-gray-200 font-medium">{fp.worker_name || fp.worker || fp.worker_code || `Worker ${fp.worker_code || fp.id || i}`}</p>
+                            <p className="text-gray-400 text-sm mt-1">{fp.violation_type || fp.violation || fp.message || "Unknown Violation"}</p>
+                          </div>
+                          <div className="text-xs text-gray-400">{fp.created_at ? new Date(fp.created_at).toLocaleString() : ""}</div>
+                        </div>
+                        <div className="mt-2 text-sm text-gray-400">{fp.camera || fp.camera_location || "Unknown Camera"}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
+              <h3 className="text-xl font-semibold text-gray-200 mb-4">Manually Changed / Supervisor Overrides</h3>
+              <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3">
+                {manualOverridesList.length === 0 ? (
+                  <div className="text-gray-400 text-sm">No manual overrides recorded for this period.</div>
+                ) : (
+                  manualOverridesList.map((mo, i) => (
+                    <div key={mo.id || i} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 flex items-start gap-3">
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="text-gray-200 font-medium">{mo.worker_name || mo.worker || mo.worker_code || `Worker ${mo.worker_code || mo.id || i}`}</p>
+                            <p className="text-gray-400 text-sm mt-1">{mo.violation_type || mo.violation || "Unknown Violation"}</p>
+                          </div>
+                          <div className="text-xs text-gray-400">{mo.changed_at ? new Date(mo.changed_at).toLocaleString() : mo.created_at ? new Date(mo.created_at).toLocaleString() : ""}</div>
+                        </div>
+                        <div className="mt-2 text-sm text-gray-400">Changed by: {mo.changed_by || mo.changed_by_name || "Supervisor"}</div>
+                        <div className="mt-2 text-sm text-gray-400">{mo.camera || mo.camera_location || "Unknown Camera"}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
