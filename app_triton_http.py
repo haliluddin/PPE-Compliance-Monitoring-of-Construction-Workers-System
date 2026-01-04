@@ -961,35 +961,62 @@ def list_violations(job_id: int = None, limit: int = 50, offset: int = 0):
 
 @app.put("/violations/{violation_id}/status")
 def update_violation_status(violation_id: int, payload: dict = Body(...), current_user=Depends(get_current_user)):
+    def _extract_user_id(u):
+        if not u:
+            return None
+        try:
+            if isinstance(u, dict):
+                return u.get("id") or u.get("user_id") or u.get("sub") or u.get("userId")
+        except Exception:
+            pass
+        for attr in ("id", "user_id", "userId", "userId", "sub"):
+            try:
+                val = getattr(u, attr, None)
+                if val is not None:
+                    return val
+            except Exception:
+                continue
+        try:
+            if hasattr(u, "get") and callable(getattr(u, "get")):
+                return u.get("id") or u.get("user_id") or u.get("sub")
+        except Exception:
+            pass
+        return None
+
     sess = SessionLocal()
     try:
         v = sess.query(Violation).filter(Violation.id == violation_id).first()
         if not v:
             raise HTTPException(status_code=404, detail="violation not found")
+
         new_status = payload.get("status")
         if new_status is None:
             raise HTTPException(status_code=400, detail="status required")
-        try:
-            prev_status = (v.status or "").lower()
-            new_status_lower = (new_status or "").lower()
-            update_fields = {"status": new_status}
-            if new_status_lower == "resolved":
-                update_fields["resolved_at"] = datetime.now(timezone.utc)
-            if prev_status != new_status_lower:
-                update_fields["manually_changed"] = True
-                cur_usr_id = None
-                try:
-                    cur_usr_id = getattr(current_user, "id", None)
-                except Exception:
-                    cur_usr_id = None
-                update_fields["changed_by"] = cur_usr_id
-                update_fields["changed_at"] = datetime.now(timezone.utc)
-            sess.query(Violation).filter(Violation.id == violation_id).update(update_fields, synchronize_session=False)
-            sess.commit()
-            v = sess.query(Violation).filter(Violation.id == violation_id).first()
-        except Exception:
-            sess.rollback()
-            raise
+
+        prev_status = (v.status or "").lower()
+        new_status_lower = (new_status or "").lower()
+
+        update_fields = {"status": new_status}
+
+        if new_status_lower == "resolved":
+            update_fields["resolved_at"] = datetime.now(timezone.utc)
+
+        if prev_status != new_status_lower:
+            update_fields["manually_changed"] = True
+            cur_usr_id = _extract_user_id(current_user)
+            try:
+                if cur_usr_id is not None:
+                    cur_usr_id = int(cur_usr_id)
+            except Exception:
+                pass
+            update_fields["changed_by"] = cur_usr_id
+            update_fields["changed_at"] = datetime.now(timezone.utc)
+
+        sess.query(Violation).filter(Violation.id == violation_id).update(update_fields, synchronize_session=False)
+        sess.commit()
+
+        v = sess.query(Violation).filter(Violation.id == violation_id).first()
+
         notif_payload = {"type": "status_update", "violation_id": v.id, "status": v.status, "created_at": to_iso_ph(datetime.now(timezone.utc))}
         try:
             if redis_sync is not None:
@@ -1009,7 +1036,8 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
                         pass
         except Exception:
             pass
-        return {"id": v.id, "status": v.status}
+
+        return {"id": v.id, "status": v.status, "manually_changed": getattr(v, "manually_changed", None), "changed_by": getattr(v, "changed_by", None), "changed_at": to_iso_ph(getattr(v, "changed_at", None))}
     finally:
         sess.close()
 
