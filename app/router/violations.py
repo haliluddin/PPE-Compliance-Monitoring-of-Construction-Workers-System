@@ -1,4 +1,3 @@
-# app/router/violations.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -7,10 +6,10 @@ from app.router.auth import get_current_user
 from app.router.notifications_ws import broadcast_notification
 from app.schemas import ViolationCreate
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import base64
 
-PH_TZ = timezone(timedelta(hours=8)) if 'timedelta' in globals() else timezone.utc
+PH_TZ = timezone(timedelta(hours=8))
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
 
@@ -169,7 +168,22 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
             pass
     else:
         violation.resolved_at = None
-    violation.manually_changed = True
+    try:
+        violation.manually_changed = violation.user_id
+    except Exception:
+        try:
+            violation.manually_changed = True
+        except Exception:
+            pass
+    try:
+        actor_id = getattr(current_user, "id", None) or getattr(violation, "user_id", None)
+        violation.changed_by = actor_id
+    except Exception:
+        pass
+    try:
+        violation.changed_at = now_utc
+    except Exception:
+        pass
     db.commit()
     db.refresh(violation)
     status_message = f"Violation #{violation.id} status updated to {new_status}"
@@ -203,6 +217,8 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
         "camera_location": camera_location,
         "violation_types": violation.violation_types,
         "worker_code": violation.worker_code,
+        "changed_by": violation.changed_by,
+        "changed_at": violation.changed_at.isoformat() if getattr(violation, "changed_at", None) else None
     }
     try:
         loop = asyncio.get_event_loop()
