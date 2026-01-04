@@ -976,7 +976,6 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
                 v.status = new_status
                 v.manually_changed = True
                 try:
-                    # copy what's in violations.user_id into changed_by
                     v.changed_by = getattr(v, "user_id", None)
                 except Exception:
                     try:
