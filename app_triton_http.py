@@ -1,4 +1,3 @@
-# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -41,7 +40,6 @@ from app.database import SessionLocal
 from app.models import Job, Camera, Violation
 from app.tasks import process_image_task, process_image
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 log = logging.getLogger("uvicorn.error")
 
@@ -972,25 +970,19 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
             raise HTTPException(status_code=400, detail="status required")
         try:
             prev_status = (v.status or "").lower()
+            v.status = new_status
+            if new_status.lower() == "resolved":
+                try:
+                    v.resolved_at = datetime.now(timezone.utc)
+                except Exception:
+                    pass
             if prev_status != (new_status or "").lower():
-                v.status = new_status
                 v.manually_changed = True
                 try:
                     v.changed_by = getattr(v, "user_id", None)
-                except Exception:
-                    try:
-                        v.changed_by = getattr(current_user, "id", None)
-                    except Exception:
-                        v.changed_by = None
-                try:
                     v.changed_at = datetime.now(timezone.utc)
                 except Exception:
                     pass
-                if new_status.lower() == "resolved":
-                    try:
-                        v.resolved_at = datetime.now(timezone.utc)
-                    except Exception:
-                        pass
             sess.commit()
             sess.refresh(v)
         except Exception:
@@ -1139,57 +1131,70 @@ from app.router.reports import get_reports_summary as reports_summary_func, get_
 def quick_reports_proxy(period: str = "today", current_user=Depends(get_current_user)):
     sess = SessionLocal()
     try:
-        base_summary = reports_summary_func(db=sess, current_user=current_user, period=period)
-        false_pos_rows = sess.query(Violation).filter(func.lower(Violation.status) == "false positive").order_by(Violation.id.desc()).limit(100).all()
-        manual_override_rows = sess.query(Violation).filter(getattr(Violation, "manually_changed", False) == True).order_by(Violation.id.desc()).limit(100).all()
-        def _serialize(r):
-            worker_name = None
-            try:
-                if getattr(r, "worker", None):
-                    worker_obj = r.worker
-                    worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
-            except Exception:
+        summary = reports_summary_func(db=sess, current_user=current_user, period=period)
+        try:
+            now_utc = datetime.now(timezone.utc)
+            if period == "today":
+                ph_now = now_utc.astimezone(PH_TZ)
+                start_ph = ph_now.replace(hour=0, minute=0, second=0, microsecond=0)
+                start_utc = start_ph.astimezone(timezone.utc)
+            elif period in ("last_week", "last-7-days", "lastweek"):
+                start_utc = now_utc - timedelta(days=7)
+            elif period in ("last_month", "last-30-days", "lastmonth"):
+                start_utc = now_utc - timedelta(days=30)
+            else:
+                start_utc = now_utc - timedelta(days=1)
+            fps_q = sess.query(Violation).filter(Violation.created_at >= start_utc, (Violation.status == "false positive"))
+            mo_q = sess.query(Violation).filter(Violation.created_at >= start_utc, (Violation.manually_changed == True))
+            fps = fps_q.order_by(Violation.id.desc()).limit(20).all()
+            mos = mo_q.order_by(Violation.id.desc()).limit(20).all()
+            def _serialize_violation(r):
                 worker_name = None
-            if not worker_name:
-                worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
-            camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
-            try:
-                cam = getattr(r, "camera", None)
-                if cam:
-                    camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
-            except Exception:
-                pass
-            snapshot_b64 = None
-            try:
-                snap = getattr(r, "snapshot", None)
-                if snap:
-                    if isinstance(snap, (bytes, bytearray)):
-                        snapshot_b64 = base64.b64encode(snap).decode("ascii")
-                    elif isinstance(snap, str):
-                        snapshot_b64 = snap
-            except Exception:
+                try:
+                    if getattr(r, "worker", None):
+                        worker_obj = r.worker
+                        worker_name = getattr(worker_obj, "fullName", None) or getattr(worker_obj, "name", None)
+                except Exception:
+                    worker_name = None
+                if not worker_name:
+                    worker_name = getattr(r, "worker_name", None) or getattr(r, "worker", None) or getattr(r, "worker_code", None) or "Unknown Worker"
+                camera_name = "Video Upload" if getattr(r, "camera_id", None) is None else "Unknown Camera"
+                try:
+                    cam = getattr(r, "camera", None)
+                    if cam:
+                        camera_name = getattr(cam, "name", f"Camera {getattr(cam, 'id', '')}")
+                except Exception:
+                    pass
                 snapshot_b64 = None
-            return {
-                "id": r.id,
-                "violation_id": r.id,
-                "job_id": getattr(r, "job_id", None),
-                "worker_code": getattr(r, "worker_code", None),
-                "worker": worker_name,
-                "violation": getattr(r, "violation_types", None) or getattr(r, "violation", None),
-                "status": getattr(r, "status", None),
-                "camera": camera_name,
-                "created_at": to_iso_ph(getattr(r, "created_at", None)),
-                "changed_at": to_iso_ph(getattr(r, "changed_at", None)),
-                "changed_by": getattr(r, "changed_by", None),
-                "manually_changed": bool(getattr(r, "manually_changed", False)),
-                "snapshot": snapshot_b64
-            }
-        false_positives = [_serialize(r) for r in false_pos_rows]
-        manual_overrides = [_serialize(r) for r in manual_override_rows]
-        out = dict(base_summary)
-        out["false_positives"] = false_positives
-        out["manual_overrides"] = manual_overrides
-        return out
+                try:
+                    snap = getattr(r, "snapshot", None)
+                    if snap:
+                        if isinstance(snap, (bytes, bytearray)):
+                            snapshot_b64 = base64.b64encode(snap).decode("ascii")
+                        elif isinstance(snap, str):
+                            snapshot_b64 = snap
+                except Exception:
+                    snapshot_b64 = None
+                return {
+                    "id": r.id,
+                    "violation_id": r.id,
+                    "worker": worker_name,
+                    "worker_code": getattr(r, "worker_code", None),
+                    "violation": getattr(r, "violation_types", None) or getattr(r, "violation", None),
+                    "camera": camera_name,
+                    "created_at": to_iso_ph(getattr(r, "created_at", None)),
+                    "status": getattr(r, "status", None),
+                    "manually_changed": bool(getattr(r, "manually_changed", False)),
+                    "changed_by": getattr(r, "changed_by", None),
+                    "changed_at": to_iso_ph(getattr(r, "changed_at", None)),
+                    "snapshot": snapshot_b64
+                }
+            summary = dict(summary) if isinstance(summary, dict) else {"summary": summary}
+            summary["false_positives_list"] = [_serialize_violation(r) for r in fps]
+            summary["manual_overrides_list"] = [_serialize_violation(r) for r in mos]
+        except Exception:
+            pass
+        return summary
     finally:
         sess.close()
 

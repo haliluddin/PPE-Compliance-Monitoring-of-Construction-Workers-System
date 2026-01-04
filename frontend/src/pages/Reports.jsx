@@ -1,4 +1,3 @@
-// frontend/src/pages/Reports.jsx
 import React, { useState, useEffect } from "react";
 import API from "../api";
 import { FiSearch, FiDownload, FiCheck } from "react-icons/fi";
@@ -45,8 +44,8 @@ export default function Reports() {
           total_workers_involved: response.data.total_workers_involved || 0,
           violation_resolution_rate: response.data.violation_resolution_rate || 0,
           high_risk_locations: response.data.high_risk_locations || 0,
-          false_positive_count: response.data.false_positive_count || (response.data.false_positives ? response.data.false_positives.length : 0),
-          manual_override_count: response.data.manual_override_count || (response.data.manual_overrides ? response.data.manual_overrides.length : 0)
+          false_positive_count: response.data.false_positive_count || 0,
+          manual_override_count: response.data.manual_override_count || 0
         });
 
         setViolationsData(response.data.most_violations || []);
@@ -58,8 +57,8 @@ export default function Reports() {
           }))
         );
 
-        setFalsePositives(response.data.false_positives || []);
-        setManualOverrides(response.data.manual_overrides || []);
+        setFalsePositives(response.data.false_positives_list || []);
+        setManualOverrides(response.data.manual_overrides_list || []);
       } catch (err) {
         console.error("Error fetching reports:", err);
       }
@@ -106,7 +105,6 @@ export default function Reports() {
       const yyyy = now.getFullYear();
       const mm = String(now.getMonth() + 1).padStart(2, "0");
       const dd = String(now.getDate()).padStart(2, "0");
-      const dateStr = `${yyyy}${mm}${dd}`;
       const filename = `report_${periodParam}_${getDateRangeLabel().replace(/[^a-zA-Z0-9]/g, "_")}.csv`;
 
       const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -274,24 +272,20 @@ export default function Reports() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-              <div className="flex items-center gap-2 mb-4">
-                <h3 className="text-xl font-semibold text-gray-200">False Positives Detected</h3>
-              </div>
-              <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+              <h3 className="text-xl font-semibold text-gray-200 mb-4">False Positives Detected</h3>
+              <div className="max-h-64 overflow-y-auto pr-2 space-y-3">
                 {falsePositives.length === 0 ? (
-                  <div className="text-gray-400">No false positives recorded.</div>
+                  <div className="text-gray-400">No false positives for the selected period.</div>
                 ) : (
                   falsePositives.map((fp) => (
-                    <div key={fp.id} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 hover:bg-[#3A3B40] transition-colors">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-gray-200 font-medium">{fp.worker || fp.worker_code || "Unknown"}</p>
-                          <p className="text-gray-400 text-sm mt-1">{fp.violation || "Unknown Violation"}</p>
-                          <p className="text-gray-500 text-xs mt-1">{fp.camera || "-"}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-gray-400 text-xs">{fp.created_at ? new Date(fp.created_at).toLocaleString() : "-"}</p>
-                        </div>
+                    <div key={fp.id} className="flex items-center justify-between bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
+                      <div>
+                        <div className="text-gray-200 font-medium">{fp.worker || fp.worker_code || "Unknown"}</div>
+                        <div className="text-gray-400 text-sm mt-1">{fp.violation || "Unknown Violation"}</div>
+                        <div className="text-gray-500 text-xs mt-1">{fp.camera} • {fp.created_at}</div>
+                      </div>
+                      <div className="w-24 h-16 bg-gray-800 rounded overflow-hidden flex items-center justify-center">
+                        {fp.snapshot ? <img src={`data:image/jpeg;base64,${fp.snapshot}`} alt="snap" className="object-contain w-full h-full" /> : <div className="text-gray-500 text-xs">No Snapshot</div>}
                       </div>
                     </div>
                   ))
@@ -300,25 +294,20 @@ export default function Reports() {
             </div>
 
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-              <div className="flex items-center gap-2 mb-4">
-                <h3 className="text-xl font-semibold text-gray-200">Manual Overrides / Supervisor Changes</h3>
-              </div>
-              <div className="max-h-[300px] overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+              <h3 className="text-xl font-semibold text-gray-200 mb-4">Manual Overrides / Supervisor Changes</h3>
+              <div className="max-h-64 overflow-y-auto pr-2 space-y-3">
                 {manualOverrides.length === 0 ? (
-                  <div className="text-gray-400">No manual overrides recorded.</div>
+                  <div className="text-gray-400">No manual overrides for the selected period.</div>
                 ) : (
                   manualOverrides.map((mo) => (
-                    <div key={mo.id} className="bg-[#1E1F23] rounded-lg p-3 border border-gray-700 hover:bg-[#3A3B40] transition-colors">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-gray-200 font-medium">{mo.worker || mo.worker_code || "Unknown"}</p>
-                          <p className="text-gray-400 text-sm mt-1">{mo.violation || "Unknown Violation"}</p>
-                          <p className="text-gray-500 text-xs mt-1">Changed by: {mo.changed_by ?? "N/A"}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-gray-400 text-xs">{mo.changed_at ? new Date(mo.changed_at).toLocaleString() : "-"}</p>
-                          <p className="text-gray-500 text-xs mt-1">{mo.camera || "-"}</p>
-                        </div>
+                    <div key={mo.id} className="flex items-center justify-between bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
+                      <div>
+                        <div className="text-gray-200 font-medium">{mo.worker || mo.worker_code || "Unknown"}</div>
+                        <div className="text-gray-400 text-sm mt-1">{mo.violation || "Unknown Violation"}</div>
+                        <div className="text-gray-500 text-xs mt-1">Changed at: {mo.changed_at || mo.created_at} • Changed by user id: {mo.changed_by || "N/A"}</div>
+                      </div>
+                      <div className="w-24 h-16 bg-gray-800 rounded overflow-hidden flex items-center justify-center">
+                        {mo.snapshot ? <img src={`data:image/jpeg;base64,${mo.snapshot}`} alt="snap" className="object-contain w-full h-full" /> : <div className="text-gray-500 text-xs">No Snapshot</div>}
                       </div>
                     </div>
                   ))
