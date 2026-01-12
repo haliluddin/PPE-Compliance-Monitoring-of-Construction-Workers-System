@@ -131,8 +131,11 @@ def get_reports_summary(
     )
     top_offenders = [{"name": t[0], "value": t[1]} for t in top_offenders_raw]
 
+    # Fetch per-camera stats (include name and location for nicer display)
     camera_stats = (
         db.query(
+            Camera.id.label("camera_id"),
+            Camera.name.label("name"),
             Camera.location.label("location"),
             func.count(Violation.id).label("violations")
         )
@@ -155,10 +158,38 @@ def get_reports_summary(
             risk = "Medium"
         else:
             risk = "Low"
+        # build a friendly display string
+        if getattr(c, "name", None) and getattr(c, "location", None):
+            loc_display = f"{c.name} ({c.location})"
+        elif getattr(c, "name", None):
+            loc_display = c.name
+        elif getattr(c, "location", None):
+            loc_display = c.location
+        else:
+            loc_display = "Unknown Location"
         camera_data.append({
-            "location": c.location or "Unknown Location",
+            "location": loc_display,
             "violations": c.violations,
             "risk": risk
+        })
+
+    # Aggregate all violations that have no camera_id (video uploads) into a single entry
+    null_camera_count = (
+        db.query(func.count(Violation.id))
+        .filter(base_filter, Violation.camera_id == None)
+        .scalar() or 0
+    )
+    if null_camera_count > 0:
+        if null_camera_count > 10:
+            null_risk = "High"
+        elif null_camera_count >= 5:
+            null_risk = "Medium"
+        else:
+            null_risk = "Low"
+        camera_data.append({
+            "location": "Video Upload (Video Upload)",
+            "violations": null_camera_count,
+            "risk": null_risk
         })
 
     worker_resolution_stats = (

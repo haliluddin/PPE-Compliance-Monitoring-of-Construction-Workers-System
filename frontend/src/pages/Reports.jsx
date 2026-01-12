@@ -272,7 +272,7 @@ export default function Reports() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold text-gray-200 mb-4">False Positives Detected</h3>
+              <h3 className="text-xl font-semibold text-gray-200 mb-4">False Positives</h3>
               <div className="max-h-64 overflow-y-auto pr-2 space-y-3">
                 {falsePositives.length === 0 ? (
                   <div className="text-gray-400">No false positives for the selected period.</div>
@@ -294,7 +294,7 @@ export default function Reports() {
             </div>
 
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold text-gray-200 mb-4">Manual Overrides / Supervisor Changes</h3>
+              <h3 className="text-xl font-semibold text-gray-200 mb-4">Manual Overrides</h3>
               <div className="max-h-64 overflow-y-auto pr-2 space-y-3">
                 {manualOverrides.length === 0 ? (
                   <div className="text-gray-400">No manual overrides for the selected period.</div>
