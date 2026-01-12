@@ -169,7 +169,16 @@ async def update_violation_status(violation_id: int, payload: dict, db: Session 
             pass
     else:
         violation.resolved_at = None
+    # mark as manually changed and record who and when
     violation.manually_changed = True
+    try:
+        violation.changed_by = current_user.id
+    except Exception:
+        violation.changed_by = getattr(current_user, "id", None)
+    try:
+        violation.changed_at = now_utc
+    except Exception:
+        pass
     db.commit()
     db.refresh(violation)
     status_message = f"Violation #{violation.id} status updated to {new_status}"

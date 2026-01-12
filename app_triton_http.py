@@ -977,12 +977,13 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
                 except Exception:
                     pass
             if prev_status != (new_status or "").lower():
+                # mark as manually changed by the acting user and record timestamp
                 try:
-                    v.manually_changed = getattr(v, "user_id", None)
+                    v.manually_changed = True
                 except Exception:
-                    v.manually_changed = getattr(v, "user_id", None)
+                    v.manually_changed = True
                 try:
-                    v.changed_by = getattr(v, "user_id", None)
+                    v.changed_by = current_user.id if getattr(current_user, "id", None) is not None else getattr(v, "user_id", None)
                 except Exception:
                     v.changed_by = getattr(v, "user_id", None)
                 try:
