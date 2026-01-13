@@ -463,9 +463,6 @@ export default function Reports() {
       {modalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
           <div className="bg-[#1F2025] rounded-2xl shadow-2xl max-w-[90%] max-h-[90%] relative">
-            <button onClick={closeModal} className="absolute top-3 right-3 text-gray-400 hover:text-white transition" aria-label="Close">
-              <FiX size={22} />
-            </button>
             <div className="flex justify-between items-center px-6 py-4">
               <div></div>
               <button onClick={closeModal} className="text-gray-400 hover:text-white transition"><FiX size={22}/></button>
