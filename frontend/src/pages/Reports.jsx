@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import API from "../api";
-import { FiSearch, FiDownload, FiCheck } from "react-icons/fi";
+import { FiSearch, FiDownload, FiCheck, FiX } from "react-icons/fi";
 import { HiOutlinePrinter } from "react-icons/hi";
 import { FaMapMarkerAlt, FaUserAlt, FaChartLine } from 'react-icons/fa';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, LineChart, Line, Legend } from 'recharts';
@@ -172,11 +172,25 @@ export default function Reports() {
 
   const openSnapshotModal = (snapshot) => {
     if (!snapshot) return;
-    if (snapshot.startsWith("data:")) {
-      setModalImage(snapshot);
-    } else {
-      setModalImage(`data:image/jpeg;base64,${snapshot}`);
+    let src = null;
+    try {
+      if (typeof snapshot === "string" && snapshot.startsWith("data:")) {
+        src = snapshot;
+      } else if (typeof snapshot === "string") {
+        src = `data:image/jpeg;base64,${snapshot}`;
+      } else if (snapshot instanceof ArrayBuffer || ArrayBuffer.isView(snapshot)) {
+        const bytes = snapshot instanceof ArrayBuffer ? new Uint8Array(snapshot) : new Uint8Array(snapshot.buffer || snapshot);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        src = `data:image/jpeg;base64,${btoa(binary)}`;
+      } else {
+        return;
+      }
+    } catch (e) {
+      console.error("openSnapshotModal error:", e);
+      return;
     }
+    setModalImage(src);
     setModalOpen(true);
   };
 
@@ -448,7 +462,7 @@ export default function Reports() {
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
-          <div className="relative bg-white rounded-lg shadow-lg max-w-[90%] max-h-[90%] p-6">
+          <div className="relative bg-white rounded-lg shadow-lg max-w-[90%] max-h-[90%] p-4">
             <button onClick={closeModal} className="absolute top-3 right-3 text-gray-600 hover:text-gray-900 text-2xl"><FiX size={22} /></button>
             <div className="flex justify-center items-center">
               <img src={modalImage} alt="snapshot" className="max-w-full max-h-[80vh] rounded" />
