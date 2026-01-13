@@ -242,10 +242,11 @@ export default function Camera() {
   };
 
   const createCameraOnServer = async ({ name, location, stream_url, draw_labels }) => {
-    const payload = { name, location, stream_url, draw_labels: draw_labels ?? drawLabels };
+    const final_draw_labels = typeof draw_labels === "undefined" ? !!drawLabels : !!draw_labels;
+    const payload = { name, location, stream_url, draw_labels: final_draw_labels };
     const res = await fetch(`${API_BASE}/cameras`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeader() },
       body: JSON.stringify(payload)
     });
     if (!res.ok) {
@@ -256,11 +257,13 @@ export default function Camera() {
   };
 
   const startStreamOnServer = async ({ stream_url, camera_id, draw_labels }) => {
+    const final_draw_labels = typeof draw_labels === "undefined" ? !!drawLabels : !!draw_labels;
+    const payload = { stream_url, camera_id, draw_labels: final_draw_labels };
     const headers = { "Content-Type": "application/json", ...getAuthHeader() };
     const res = await fetch(`${API_BASE}/streams`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ stream_url, camera_id, draw_labels })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
@@ -410,7 +413,7 @@ export default function Camera() {
 
         <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {cameras
-            .filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+            .filter(c => (c.title || "").toLowerCase().includes((searchQuery || "").toLowerCase()))
             .map((camera, index) => {
               const isExpandable = !nonExpandableStatuses.includes(String(camera.status).toUpperCase());
               const displayedTitle = (camera.videoUrl && (!camera.meta || camera.meta.is_stream === false)) ? (camera.meta?.title || camera.title) : (camera.location || camera.title);

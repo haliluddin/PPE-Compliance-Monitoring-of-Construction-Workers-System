@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Body, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.router.auth import get_current_user
 import numpy as np
 import cv2
@@ -600,7 +600,10 @@ class StreamStart(BaseModel):
     stream_url: str
     camera_id: int = None
     job_id: int = None
-    draw_labels: bool = True
+    draw_labels: bool = Field(True, alias="drawLabels")
+
+    class Config:
+        allow_population_by_field_name = True
 
 def stream_loop(job_id: int, rtsp_url: str, camera_id=None, stop_event: threading.Event = None):
     cap = None
@@ -785,10 +788,11 @@ def start_stream(payload: StreamStart, current_user=Depends(get_current_user)):
     rtsp_url = payload.stream_url
     camera_id = payload.camera_id
     job_id = payload.job_id
+    draw_labels_val = bool(getattr(payload, "draw_labels", True))
     if job_id is None:
         sess = SessionLocal()
         try:
-            job_meta = {"stream_url": rtsp_url, "draw_labels": bool(getattr(payload, "draw_labels", True))}
+            job_meta = {"stream_url": rtsp_url, "draw_labels": draw_labels_val}
             job = Job(job_type="stream", camera_id=camera_id, status="queued", meta=job_meta, user_id=getattr(current_user, "id", None))
             sess.add(job)
             sess.commit()
