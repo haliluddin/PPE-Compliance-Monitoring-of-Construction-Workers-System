@@ -316,13 +316,13 @@ export default function Reports() {
                     <div key={fp.id} className="bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-gray-200 font-medium">{fp.worker || fp.worker_code || "Unknown"}</div>
-                          <span className="text-gray-500 text-xs">{(fp.status || "").toUpperCase()}</span>
+                          <span className="text-gray-400 text-xs">{(fp.status || "").toUpperCase()}</span>
                         </div>
-                        <div className="text-gray-400 text-sm mt-1">{fp.violation || "Unknown Violation"}</div>
-                        <div className="text-gray-500 text-xs mt-1">{formatDateTime(fp.created_at)} in {fp.camera}</div>
+                        <div className="text-gray-400 text-sm mt-2">{fp.violation || "Unknown Violation"}</div>
+                        <div className="text-gray-500 text-xs mt-2">{formatDateTime(fp.created_at)} in {fp.camera}</div>
                         <div className="mt-2">
                           {fp.snapshot ? (
-                            <button onClick={() => openSnapshotModal(fp.snapshot)} className="text-sm px-3 py-2 bg-[#5388DF] rounded-md text-white hover:bg-[#3b6fbf]">Show snapshot</button>
+                            <button onClick={() => openSnapshotModal(fp.snapshot)} className="text-xs text-[#3b6fbf] hover:underline">Show snapshot</button>
                           ) : (
                             <div className="text-gray-500 text-xs">No Snapshot</div>
                           )}
@@ -343,13 +343,13 @@ export default function Reports() {
                     <div key={mo.id} className="bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-gray-200 font-medium">{mo.worker || mo.worker_code || "Unknown"}</div>
-                          <span className="text-gray-500 text-xs">{(mo.status || "").toUpperCase()}</span>
+                          <span className="text-gray-400 text-xs">{(mo.status || "").toUpperCase()}</span>
                         </div>
-                        <div className="text-gray-400 text-sm mt-1">{mo.violation || "Unknown Violation"}</div>
-                        <div className="text-gray-500 text-xs mt-1">{formatDateTime(mo.changed_at || mo.created_at)} by {mo.changed_by_name || mo.changed_by || "N/A"}</div>
+                        <div className="text-gray-400 text-sm mt-2">{mo.violation || "Unknown Violation"}</div>
+                        <div className="text-gray-500 text-xs mt-2">{formatDateTime(mo.changed_at || mo.created_at)} by {mo.changed_by_name || mo.changed_by || "N/A"}</div>
                         <div className="mt-2">
                           {mo.snapshot ? (
-                            <button onClick={() => openSnapshotModal(mo.snapshot)} className="text-sm px-3 py-2 bg-[#5388DF] rounded-md text-white hover:bg-[#3b6fbf]">Show snapshot</button>
+                            <button onClick={() => openSnapshotModal(mo.snapshot)} className="text-xs text-[#3b6fbf] hover:underline">Show snapshot</button>
                           ) : (
                             <div className="text-gray-500 text-xs">No Snapshot</div>
                           )}
@@ -447,9 +447,9 @@ export default function Reports() {
       )}
 
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70">
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
           <div className="relative max-w-[90%] max-h-[90%]">
-            <button onClick={closeModal} className="absolute -top-4 -right-4 bg-gray-800 text-white rounded-full w-10 h-10 flex items-center justify-center text-xl">×</button>
+            <button onClick={closeModal} className="text-gray-400 hover:text-white transition"><FiX size={22} /></button>
             <img src={modalImage} alt="snapshot" className="max-w-full max-h-[80vh] rounded-md" />
           </div>
         </div>
