@@ -244,9 +244,10 @@ export default function Camera() {
   const createCameraOnServer = async ({ name, location, stream_url, draw_labels }) => {
     const final_draw_labels = typeof draw_labels === "undefined" ? !!drawLabels : !!draw_labels;
     const payload = { name, location, stream_url, draw_labels: final_draw_labels };
+    const headers = { "Content-Type": "application/json", ...getAuthHeader() };
     const res = await fetch(`${API_BASE}/cameras`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...getAuthHeader() },
+      headers,
       body: JSON.stringify(payload)
     });
     if (!res.ok) {
