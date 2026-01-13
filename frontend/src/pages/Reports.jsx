@@ -23,6 +23,8 @@ export default function Reports() {
   const [avgResponseTime, setAvgResponseTime] = useState(0);
   const [falsePositives, setFalsePositives] = useState([]);
   const [manualOverrides, setManualOverrides] = useState([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalImage, setModalImage] = useState(null);
 
   useEffect(() => {
     const fetchReports = async () => {
@@ -149,6 +151,39 @@ export default function Reports() {
   };
 
   const performanceTicks = performanceData.map((p) => p.date);
+
+  const formatDateTime = (iso) => {
+    if (!iso) return "N/A";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      const options = { year: 'numeric', month: 'long', day: 'numeric' };
+      const datePart = d.toLocaleDateString('en-US', options);
+      let hour = d.getHours();
+      const minute = String(d.getMinutes()).padStart(2, '0');
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      hour = hour % 12;
+      if (hour === 0) hour = 12;
+      return `${datePart} at ${hour}:${minute} ${ampm}`;
+    } catch (e) {
+      return iso;
+    }
+  };
+
+  const openSnapshotModal = (snapshot) => {
+    if (!snapshot) return;
+    if (snapshot.startsWith("data:")) {
+      setModalImage(snapshot);
+    } else {
+      setModalImage(`data:image/jpeg;base64,${snapshot}`);
+    }
+    setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalImage(null);
+  };
 
   return (
     <div className="min-h-screen bg-[#1E1F23] text-gray-100 p-6" id="printable-reports">
@@ -278,15 +313,20 @@ export default function Reports() {
                   <div className="text-gray-400">No false positives for the selected period.</div>
                 ) : (
                   falsePositives.map((fp) => (
-                    <div key={fp.id} className="flex items-center justify-between bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
-                      <div>
-                        <div className="text-gray-200 font-medium">{fp.worker || fp.worker_code || "Unknown"}</div>
+                    <div key={fp.id} className="bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-gray-200 font-medium">{fp.worker || fp.worker_code || "Unknown"}</div>
+                          <span className="text-gray-500 text-xs">{(fp.status || "").toUpperCase()}</span>
+                        </div>
                         <div className="text-gray-400 text-sm mt-1">{fp.violation || "Unknown Violation"}</div>
-                        <div className="text-gray-500 text-xs mt-1">{fp.camera} • {fp.created_at}</div>
-                      </div>
-                      <div className="w-24 h-16 bg-gray-800 rounded overflow-hidden flex items-center justify-center">
-                        {fp.snapshot ? <img src={`data:image/jpeg;base64,${fp.snapshot}`} alt="snap" className="object-contain w-full h-full" /> : <div className="text-gray-500 text-xs">No Snapshot</div>}
-                      </div>
+                        <div className="text-gray-500 text-xs mt-1">{formatDateTime(fp.created_at)} in {fp.camera}</div>
+                        <div className="mt-2">
+                          {fp.snapshot ? (
+                            <button onClick={() => openSnapshotModal(fp.snapshot)} className="text-sm px-3 py-2 bg-[#5388DF] rounded-md text-white hover:bg-[#3b6fbf]">Show snapshot</button>
+                          ) : (
+                            <div className="text-gray-500 text-xs">No Snapshot</div>
+                          )}
+                        </div>
                     </div>
                   ))
                 )}
@@ -300,15 +340,20 @@ export default function Reports() {
                   <div className="text-gray-400">No manual overrides for the selected period.</div>
                 ) : (
                   manualOverrides.map((mo) => (
-                    <div key={mo.id} className="flex items-center justify-between bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
-                      <div>
-                        <div className="text-gray-200 font-medium">{mo.worker || mo.worker_code || "Unknown"}</div>
+                    <div key={mo.id} className="bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-gray-200 font-medium">{mo.worker || mo.worker_code || "Unknown"}</div>
+                          <span className="text-gray-500 text-xs">{(mo.status || "").toUpperCase()}</span>
+                        </div>
                         <div className="text-gray-400 text-sm mt-1">{mo.violation || "Unknown Violation"}</div>
-                        <div className="text-gray-500 text-xs mt-1">Changed at: {mo.changed_at || mo.created_at} • Changed by user id: {mo.changed_by || "N/A"}</div>
-                      </div>
-                      <div className="w-24 h-16 bg-gray-800 rounded overflow-hidden flex items-center justify-center">
-                        {mo.snapshot ? <img src={`data:image/jpeg;base64,${mo.snapshot}`} alt="snap" className="object-contain w-full h-full" /> : <div className="text-gray-500 text-xs">No Snapshot</div>}
-                      </div>
+                        <div className="text-gray-500 text-xs mt-1">{formatDateTime(mo.changed_at || mo.created_at)} by {mo.changed_by_name || mo.changed_by || "N/A"}</div>
+                        <div className="mt-2">
+                          {mo.snapshot ? (
+                            <button onClick={() => openSnapshotModal(mo.snapshot)} className="text-sm px-3 py-2 bg-[#5388DF] rounded-md text-white hover:bg-[#3b6fbf]">Show snapshot</button>
+                          ) : (
+                            <div className="text-gray-500 text-xs">No Snapshot</div>
+                          )}
+                        </div>
                     </div>
                   ))
                 )}
@@ -399,6 +444,15 @@ export default function Reports() {
             </ResponsiveContainer>
           </div>
         </>
+      )}
+
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70">
+          <div className="relative max-w-[90%] max-h-[90%]">
+            <button onClick={closeModal} className="absolute -top-4 -right-4 bg-gray-800 text-white rounded-full w-10 h-10 flex items-center justify-center text-xl">×</button>
+            <img src={modalImage} alt="snapshot" className="max-w-full max-h-[80vh] rounded-md" />
+          </div>
+        </div>
       )}
     </div>
   );

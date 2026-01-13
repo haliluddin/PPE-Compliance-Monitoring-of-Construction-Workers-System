@@ -1,3 +1,4 @@
+# app_triton_http.py
 import os
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
@@ -37,7 +38,7 @@ except Exception:
     InferInput = None
     InferRequestedOutput = None
 from app.database import SessionLocal
-from app.models import Job, Camera, Violation
+from app.models import Job, Camera, Violation, User
 from app.tasks import process_image_task, process_image
 from sqlalchemy.orm import Session
 
@@ -977,7 +978,6 @@ def update_violation_status(violation_id: int, payload: dict = Body(...), curren
                 except Exception:
                     pass
             if prev_status != (new_status or "").lower():
-                # mark as manually changed by the acting user and record timestamp
                 try:
                     v.manually_changed = True
                 except Exception:
@@ -1155,6 +1155,22 @@ def quick_reports_proxy(period: str = "today", current_user=Depends(get_current_
             mo_q = sess.query(Violation).filter(Violation.created_at >= start_utc, (Violation.manually_changed == True))
             fps = fps_q.order_by(Violation.id.desc()).limit(20).all()
             mos = mo_q.order_by(Violation.id.desc()).limit(20).all()
+            changed_by_ids = set()
+            for r in fps + mos:
+                cb = getattr(r, "changed_by", None)
+                if cb:
+                    try:
+                        changed_by_ids.add(int(cb))
+                    except Exception:
+                        pass
+            user_by_id = {}
+            if changed_by_ids:
+                try:
+                    users = sess.query(User.id, User.name).filter(User.id.in_(list(changed_by_ids))).all()
+                    for uid, uname in users:
+                        user_by_id[int(uid)] = uname
+                except Exception:
+                    user_by_id = {}
             def _serialize_violation(r):
                 worker_name = None
                 try:
@@ -1182,6 +1198,13 @@ def quick_reports_proxy(period: str = "today", current_user=Depends(get_current_
                             snapshot_b64 = snap
                 except Exception:
                     snapshot_b64 = None
+                changed_by_id = getattr(r, "changed_by", None)
+                changed_by_name = None
+                try:
+                    if changed_by_id is not None:
+                        changed_by_name = user_by_id.get(int(changed_by_id)) or None
+                except Exception:
+                    changed_by_name = None
                 return {
                     "id": r.id,
                     "violation_id": r.id,
@@ -1192,7 +1215,8 @@ def quick_reports_proxy(period: str = "today", current_user=Depends(get_current_
                     "created_at": to_iso_ph(getattr(r, "created_at", None)),
                     "status": getattr(r, "status", None),
                     "manually_changed": bool(getattr(r, "manually_changed", False)),
-                    "changed_by": getattr(r, "changed_by", None),
+                    "changed_by": changed_by_id,
+                    "changed_by_name": changed_by_name,
                     "changed_at": to_iso_ph(getattr(r, "changed_at", None)),
                     "snapshot": snapshot_b64
                 }
