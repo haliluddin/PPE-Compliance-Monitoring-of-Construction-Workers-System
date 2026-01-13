@@ -242,7 +242,7 @@ export default function Camera() {
   };
 
   const createCameraOnServer = async ({ name, location, stream_url, draw_labels }) => {
-    const payload = { name, location, stream_url };
+    const payload = { name, location, stream_url, draw_labels: draw_labels ?? drawLabels };
     const res = await fetch(`${API_BASE}/cameras`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -274,9 +274,9 @@ export default function Camera() {
     setErrorMsg("");
     setAddingCamera(true);
     try {
-      const camRes = await createCameraOnServer({ name: newCamName || `Camera`, location: newCamLocation || "", stream_url: newCamRtsp });
+      const camRes = await createCameraOnServer({ name: newCamName || `Camera`, location: newCamLocation || "", stream_url: newCamRtsp, draw_labels: drawLabels });
       const cameraId = camRes.camera_id ?? camRes.id;
-      const streamRes = await startStreamOnServer({ stream_url: newCamRtsp, camera_id: cameraId, draw_labels });
+      const streamRes = await startStreamOnServer({ stream_url: newCamRtsp, camera_id: cameraId, draw_labels: drawLabels });
       const jobId = streamRes.job_id ?? streamRes.jobId ?? null;
       const added = {
         job_id: jobId,
@@ -287,7 +287,7 @@ export default function Camera() {
         videoUrl: null,
         frameSrc: null,
         latest_people: [],
-        meta: { stream_url: newCamRtsp, is_stream: true, draw_labels }
+        meta: { stream_url: newCamRtsp, is_stream: true, draw_labels: drawLabels }
       };
       setCameras(prev => [...prev, added]);
       setShowAddModal(false);
