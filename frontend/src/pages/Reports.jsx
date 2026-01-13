@@ -461,12 +461,15 @@ export default function Reports() {
       )}
 
       {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
-          <div className="relative max-w-[90%] max-h-[90%]">
-            <button onClick={closeModal} className="text-gray-400 hover:text-white transition"><FiX size={22} /></button>
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50">
+          <div className="relative max-w-[90%] max-h-[90%] p-4">
+            <button onClick={closeModal} className="absolute top-3 right-3 text-gray-400 hover:text-white transition" aria-label="Close">
+              <FiX size={22} />
+            </button>
             <img src={modalImage} alt="snapshot" className="max-w-full max-h-[80vh] rounded-md" />
           </div>
         </div>
+
       )}
     </div>
   );
