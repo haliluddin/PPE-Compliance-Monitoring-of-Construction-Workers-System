@@ -308,7 +308,7 @@ export default function Reports() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
               <h3 className="text-xl font-semibold text-gray-200 mb-4">False Positives</h3>
-              <div className="max-h-64 overflow-y-auto pr-2 space-y-3">
+              <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3">
                 {falsePositives.length === 0 ? (
                   <div className="text-gray-400">No false positives for the selected period.</div>
                 ) : (
@@ -316,7 +316,7 @@ export default function Reports() {
                     <div key={fp.id} className="bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-gray-200 font-medium">{fp.worker || fp.worker_code || "Unknown"}</div>
-                          <span className="text-gray-400 text-xs">{(fp.status || "").toUpperCase()}</span>
+                          <span className="text-gray-500 text-xs">{(fp.status || "").toUpperCase()}</span>
                         </div>
                         <div className="text-gray-400 text-sm mt-2">{fp.violation || "Unknown Violation"}</div>
                         <div className="text-gray-500 text-xs mt-2">{formatDateTime(fp.created_at)} in {fp.camera}</div>
@@ -335,7 +335,7 @@ export default function Reports() {
 
             <div className="bg-[#2A2B30] rounded-xl shadow-lg p-6 border border-gray-700">
               <h3 className="text-xl font-semibold text-gray-200 mb-4">Manual Overrides</h3>
-              <div className="max-h-64 overflow-y-auto pr-2 space-y-3">
+              <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3">
                 {manualOverrides.length === 0 ? (
                   <div className="text-gray-400">No manual overrides for the selected period.</div>
                 ) : (
@@ -343,7 +343,7 @@ export default function Reports() {
                     <div key={mo.id} className="bg-[#1E1F23] p-3 rounded-lg border border-gray-700 hover:bg-[#3A3B40] transition-colors">
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-gray-200 font-medium">{mo.worker || mo.worker_code || "Unknown"}</div>
-                          <span className="text-gray-400 text-xs">{(mo.status || "").toUpperCase()}</span>
+                          <span className="text-gray-500 text-xs">{(mo.status || "").toUpperCase()}</span>
                         </div>
                         <div className="text-gray-400 text-sm mt-2">{mo.violation || "Unknown Violation"}</div>
                         <div className="text-gray-500 text-xs mt-2">{formatDateTime(mo.changed_at || mo.created_at)} by {mo.changed_by_name || mo.changed_by || "N/A"}</div>
@@ -447,10 +447,12 @@ export default function Reports() {
       )}
 
       {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
-          <div className="relative max-w-[90%] max-h-[90%]">
-            <button onClick={closeModal} className="text-gray-400 hover:text-white transition"><FiX size={22} /></button>
-            <img src={modalImage} alt="snapshot" className="max-w-full max-h-[80vh] rounded-md" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+          <div className="relative bg-white rounded-lg shadow-lg max-w-[90%] max-h-[90%] p-6">
+            <button onClick={closeModal} className="absolute top-3 right-3 text-gray-600 hover:text-gray-900 text-2xl"><FiX size={22} /></button>
+            <div className="flex justify-center items-center">
+              <img src={modalImage} alt="snapshot" className="max-w-full max-h-[80vh] rounded" />
+            </div>
           </div>
         </div>
       )}
