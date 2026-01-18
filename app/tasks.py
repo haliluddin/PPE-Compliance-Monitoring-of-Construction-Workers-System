@@ -433,6 +433,12 @@ def _process_image(image_bytes, meta=None):
             except Exception:
                 annotated_b64 = None
                 annotated_bytes = None
+        if "job_id" in meta and annotated is not None:
+            frame_dir = os.path.join("/workspace/ppe-monitor", "frames", str(meta["job_id"]))
+            os.makedirs(frame_dir, exist_ok=True)
+            frame_idx = meta.get("frame_idx", 0)
+            frame_filename = f"frame_{frame_idx:06d}.jpg"
+            cv2.imwrite(os.path.join(frame_dir, frame_filename), annotated)
         payload = {"meta": meta, "people": publish_people, "boxes_by_class": result.get("boxes_by_class", {}), "annotated_jpeg_b64": annotated_b64, "timestamp": time.time()}
         if r:
             try:

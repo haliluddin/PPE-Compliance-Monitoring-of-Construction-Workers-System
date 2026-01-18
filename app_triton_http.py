@@ -468,10 +468,6 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                     try:
                         _, jpg = cv2.imencode('.jpg', frame_small, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
                         img_bytes = jpg.tobytes()
-                        frame_dir = os.path.join("/workspace/ppe-monitor", "frames", str(job_id))
-                        os.makedirs(frame_dir, exist_ok=True)
-                        frame_filename = f"frame_{frame_idx:06d}.jpg"
-                        cv2.imwrite(os.path.join(frame_dir, frame_filename), frame_small)
                     except Exception:
                         frame_idx += 1
                         continue
