@@ -150,7 +150,7 @@ class SimpleTracker:
                 display_name = None
                 if best_id is not None:
                     s = str(best_id)
-                    if s.startswith("UNREG:"):
+                    if s.startswith("REG:"):
                         worker_code = s.split(":",1)[1]
                     else:
                         worker_code = s

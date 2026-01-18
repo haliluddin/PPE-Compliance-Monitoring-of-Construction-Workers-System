@@ -397,7 +397,7 @@ def _process_image(image_bytes, meta=None):
                     display_name = id_label.get("fullName") or id_label.get("full_name") or id_label.get("name") or None
                 else:
                     s = str(id_label)
-                    if s.startswith("UNREG:"):
+                    if s.startswith("REG:"):
                         worker_code = s.split(":", 1)[1]
                     else:
                         worker_code = s

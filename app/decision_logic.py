@@ -434,7 +434,7 @@ def detect_torso(ocr_reader, crop, regset):
                     best_conf = conf; best = d; best_txt = txt
             else:
                 if conf > best_conf and best is None:
-                    best_conf = conf; best = f"UNREG:{d}"; best_txt = txt
+                    best_conf = conf; best = f"REG:{d}"; best_txt = txt
     if best is None:
         return None, None, 0.0
     return best, best_txt, best_conf
