@@ -457,7 +457,8 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                     frame_idx += 1
                     continue
                 consecutive_no_frame = 0
-                if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0:
+                is_video = job and getattr(job, 'job_type', None) == 'video'
+                if FRAME_SKIP <= 1 or (frame_idx % FRAME_SKIP) == 0 or is_video:
                     small_w = 640
                     h, w = frame.shape[:2]
                     if w > small_w:
@@ -478,7 +479,8 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
                             job_draw_labels = bool(jm.get("draw_labels", True))
                     except Exception:
                         job_draw_labels = True
-                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time(), "draw_labels": job_draw_labels}
+                    is_video = job and getattr(job, 'job_type', None) == 'video'
+                    meta = {"job_id": job_id, "camera_id": camera_id, "frame_idx": frame_idx, "ts": time.time(), "draw_labels": job_draw_labels, "job_type": getattr(job, 'job_type', None) if job else None}
                     try:
                         q.put((img_bytes, meta), timeout=1.0)
                     except Exception:
@@ -561,7 +563,7 @@ def process_video_file(job_id: int, filepath: str, camera_id=None):
             pass
 
 @app.post("/jobs/{job_id}/upload")
-async def upload_job_video(job_id: int, file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+async def upload_job_video(job_id: int, draw_labels: bool = Query(True), file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     INFER_REQUESTS.inc()
     sess = SessionLocal()
     try:
@@ -569,6 +571,11 @@ async def upload_job_video(job_id: int, file: UploadFile = File(...), background
         if not job:
             raise HTTPException(status_code=404, detail="job not found")
         camera_id = job.camera_id
+        # Update job meta with draw_labels
+        if job.meta is None:
+            job.meta = {}
+        job.meta["draw_labels"] = draw_labels
+        sess.commit()
     finally:
         sess.close()
     filename = f"job_{job_id}_{int(time.time())}_{file.filename}"
