@@ -373,16 +373,6 @@ def _process_image(image_bytes, meta=None):
         annotated = None
         if isinstance(result, dict) and "annotated_bgr" in result:
             annotated = result.pop("annotated_bgr")
-        job_type = meta.get("job_type")
-        if job_type == "video":
-            frames_dir = os.path.join("frames", f"job_{job_id}")
-            os.makedirs(frames_dir, exist_ok=True)
-            frame_to_save = annotated if annotated is not None else frame
-            save_path = os.path.join(frames_dir, f"frame_{frame_idx:06d}.jpg")
-            try:
-                cv2.imwrite(save_path, frame_to_save)
-            except Exception:
-                log.exception(f"failed to save frame {frame_idx} for job {job_id}")
         job_id = meta.get("job_id")
         camera_id = meta.get("camera_id")
         frame_idx = meta.get("frame_idx")

@@ -194,11 +194,11 @@ export default function Camera() {
     return data.job_id;
   };
 
-  const uploadJobVideo = async (jobId, file, drawLabels) => {
+  const uploadJobVideo = async (jobId, file) => {
     const fd = new FormData();
     fd.append("file", file, file.name);
     const headers = { ...getAuthHeader() };
-    const res = await fetch(`${API_BASE}/jobs/${jobId}/upload?draw_labels=${drawLabels}`, {
+    const res = await fetch(`${API_BASE}/jobs/${jobId}/upload`, {
       method: "POST",
       headers,
       body: fd,
@@ -234,7 +234,7 @@ export default function Camera() {
       return;
     }
     try {
-      await uploadJobVideo(jobId, file, drawLabels);
+      await uploadJobVideo(jobId, file);
       setCameras(prev => prev.map(c => (String(c.job_id) === String(jobId) ? ({ ...c, status: "PROCESSING", videoUrl: localPreview }) : c)));
     } catch (e) {
       setCameras(prev => prev.map(c => (String(c.job_id) === String(jobId) ? ({ ...c, status: "UPLOAD_FAILED" }) : c)));
